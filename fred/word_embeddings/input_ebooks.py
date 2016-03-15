@@ -5,19 +5,22 @@ import os
 import re
 
 EBOOKS_PATH = "/home/fred/ebooks/"
-NB_FILES_TO_INJEST = 2
+NB_FILES_TO_INJEST = 1
 VOCABULARY_SIZE = 1000
 UNKNOWN_WORD = "_UNKNOWN_"
 
 def read_corpus(path, files_to_read):
     data = []
+    counter = collections.Counter()
     for filename in os.listdir(path):
         if filename.endswith(".txt"):
-            data.extend(read_ebook(path + filename))
+            book_data, book_counter = read_ebook(path + filename)
+            data.extend(book_data)
+            counter = counter + book_counter
             files_to_read -= 1
             if files_to_read <= 0:
                 break
-    return data
+    return data, counter
 
 def extract_word(line):
     return [w for w in re.split("[^a-z]+", line.strip().lower()) if w]
@@ -25,21 +28,24 @@ def extract_word(line):
 def read_ebook(filename):
     print "Reading %s" % filename
     data = []
+    counter = collections.Counter()
+    LINES_DEBUG = 500
     with open(filename) as ebook_file:
         # Split the file by punctuation and make an array of words
         for words in [extract_word(line) for line in re.split("[\\.\\?\\!\\:]", ebook_file.read())]:
             if words:
                 data.append(words)
+                counter = counter + collections.Counter(words)
+            LINES_DEBUG -= 1
+            if LINES_DEBUG < 0:
+                break;
     print "%d sentences." % len(data)
-    return data
+    return data, counter
 
-def build_dataset(words_list, vocabulary_size):
+def build_dataset(words_list, counter, vocabulary_size):
     print "Counting words frequencies"
     # TODO: move this counting words while reading the ebooks
     count = [[UNKNOWN_WORD, -1]]
-    counter = collections.Counter()
-    for words in words_list:
-        counter = counter + collections.Counter(words)
     count.extend(counter.most_common(vocabulary_size - 1))
     dictionary = dict()
     for word, _ in count:
@@ -60,6 +66,7 @@ def build_dataset(words_list, vocabulary_size):
             unk_count = unk_count + 1
     count[0][1] = unk_count
     reverse_dictionary = dict(zip(dictionary.values(), dictionary.keys()))
+    del words_list
     print "Most common words: %s" % count[:20]
     print "Sample data: %s" % data[:5]
     return data, count, dictionary, reverse_dictionary
@@ -68,7 +75,7 @@ class DataSets(object):
     def __init__(self, data, count, dictionary, reverse_dictionary):
         self.data = data
         self.count = count
-        self.dictionary_size = len(dictionary)
+        self.vocabulary_size = len(dictionary)
         self.dictionary = dictionary
         self.reverse_dictionary = reverse_dictionary
         self._data_index = 0
@@ -97,8 +104,8 @@ class DataSets(object):
         return batch, labels
 
 def read_data_sets():
-    words = read_corpus(EBOOKS_PATH, NB_FILES_TO_INJEST)
-    data, count, dictionary, reverse_dictionary = build_dataset(words, VOCABULARY_SIZE)
+    words, counter = read_corpus(EBOOKS_PATH, NB_FILES_TO_INJEST)
+    data, count, dictionary, reverse_dictionary = build_dataset(words, counter, VOCABULARY_SIZE)
     return DataSets(data, count, dictionary, reverse_dictionary)
 
 
