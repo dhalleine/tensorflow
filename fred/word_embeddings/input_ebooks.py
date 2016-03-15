@@ -5,6 +5,7 @@ import os
 import re
 
 EBOOKS_PATH = "/home/fred/ebooks/"
+STOP_WORDS_PATH = "data/stop_words.txt"
 NB_FILES_TO_INJEST = 1
 VOCABULARY_SIZE = 1000
 UNKNOWN_WORD = "_UNKNOWN_"
@@ -43,8 +44,9 @@ def read_ebook(filename):
     return data, counter
 
 def build_dataset(words_list, counter, vocabulary_size):
-    print "Counting words frequencies"
-    # TODO: move this counting words while reading the ebooks
+    # Remove the stop words
+    for stop_word in open(STOP_WORDS_PATH).read().split():
+        del counter[stop_word]
     count = [[UNKNOWN_WORD, -1]]
     count.extend(counter.most_common(vocabulary_size - 1))
     dictionary = dict()
