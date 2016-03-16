@@ -1,0 +1,2 @@
+bank_01,money,organization,service,salary,loan,investment,merchant
+bank_04,river,canal,land,lake

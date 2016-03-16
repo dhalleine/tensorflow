@@ -1,0 +1,3 @@
+crash_01,vehicle,accident,damage,passenger,plane
+crash_03,finance,business,fall,price,value,collapse,market,economy
+crash_04,failure,machine,system,computer

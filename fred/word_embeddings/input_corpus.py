@@ -4,7 +4,7 @@ import random
 import os
 import re
 
-EBOOKS_PATH = "/home/fred/ebooks/"
+CORPUS_PATH = "/home/fred/corpus/"
 STOP_WORDS_PATH = "data/stop_words.txt"
 NB_FILES_TO_INJEST = 1
 VOCABULARY_SIZE = 1000
@@ -15,7 +15,7 @@ def read_corpus(path, files_to_read):
     counter = collections.Counter()
     for filename in os.listdir(path):
         if filename.endswith(".txt"):
-            book_data, book_counter = read_ebook(path + filename)
+            book_data, book_counter = read_corpus(path + filename)
             data.extend(book_data)
             counter = counter + book_counter
             files_to_read -= 1
@@ -26,14 +26,14 @@ def read_corpus(path, files_to_read):
 def extract_word(line):
     return [w for w in re.split("[^a-z]+", line.strip().lower()) if w]
 
-def read_ebook(filename):
+def read_corpus(filename):
     print "Reading %s" % filename
     data = []
     counter = collections.Counter()
     LINES_DEBUG = 500
-    with open(filename) as ebook_file:
+    with open(filename) as corpus_file:
         # Split the file by punctuation and make an array of words
-        for words in [extract_word(line) for line in re.split("[\\.\\?\\!\\:]", ebook_file.read())]:
+        for words in [extract_word(line) for line in re.split("[\\.\\?\\!\\:]", corpus_file.read())]:
             if words:
                 data.append(words)
                 counter = counter + collections.Counter(words)
@@ -106,7 +106,7 @@ class DataSets(object):
         return batch, labels
 
 def read_data_sets():
-    words, counter = read_corpus(EBOOKS_PATH, NB_FILES_TO_INJEST)
+    words, counter = read_corpus(CORPUS_PATH, NB_FILES_TO_INJEST)
     data, count, dictionary, reverse_dictionary = build_dataset(words, counter, VOCABULARY_SIZE)
     return DataSets(data, count, dictionary, reverse_dictionary)
 

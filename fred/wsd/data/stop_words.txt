@@ -91,6 +91,7 @@ were
 what
 when
 where
+which
 who
 why
 with
