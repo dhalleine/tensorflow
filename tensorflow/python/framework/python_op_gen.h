@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ string GetPythonOps(const OpList& ops, const string& hidden_ops,
 // Get the python wrappers for a list of ops in a OpList.
 // buf should be a pointer to a buffer containing the binary encoded OpList
 // proto, and len should be the length of that buffer.
-string GetPythonWrappers(const char* buf, size_t len);
+string GetPythonWrappers(const char* op_wrapper_buf, size_t op_wrapper_len);
 
 }  // namespace tensorflow
 

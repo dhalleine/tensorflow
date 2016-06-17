@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -144,6 +144,20 @@ class PyOpTest(tf.test.TestCase):
                                    "Unsupported object type"):
         z.eval()
 
+  def testStateful(self):
+    # Not using self.test_session(), which disables optimization.
+    with tf.Session() as sess:
+      producer = iter(range(3))
+      x, = tf.py_func(lambda: next(producer), [], [tf.int64])
+      self.assertEqual(sess.run(x), 0)
+      self.assertEqual(sess.run(x), 1)
+      self.assertEqual(sess.run(x), 2)
+
+  def testCOrder(self):
+    with self.test_session():
+      val = [[1, 2], [3, 4]]
+      x, = tf.py_func(lambda: np.array(val, order="F"), [], [tf.int64])
+      self.assertAllEqual(val, x.eval())
 
 if __name__ == "__main__":
   tf.test.main()

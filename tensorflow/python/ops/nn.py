@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -106,7 +106,9 @@ concatenated.
 @@conv2d
 @@depthwise_conv2d
 @@separable_conv2d
+@@atrous_conv2d
 @@conv2d_transpose
+@@conv3d
 
 ## Pooling
 
@@ -126,6 +128,48 @@ to the `Convolution` section for details about the padding calculation.
 @@avg_pool
 @@max_pool
 @@max_pool_with_argmax
+@@avg_pool3d
+@@max_pool3d
+
+## Morphological filtering
+
+Morphological operators are non-linear filters used in image processing.
+
+[Greyscale morphological dilation]
+(https://en.wikipedia.org/wiki/Dilation_(morphology)) is the max-sum counterpart
+of standard sum-product convolution:
+
+    output[b, y, x, c] =
+        max_{dy, dx} input[b,
+                           strides[1] * y + rates[1] * dy,
+                           strides[2] * x + rates[2] * dx,
+                           c] +
+                     filter[dy, dx, c]
+
+The `filter` is usually called structuring function. Max-pooling is a special
+case of greyscale morphological dilation when the filter assumes all-zero
+values (a.k.a. flat structuring function).
+
+[Greyscale morphological erosion]
+(https://en.wikipedia.org/wiki/Erosion_(morphology)) is the min-sum counterpart
+of standard sum-product convolution:
+
+    output[b, y, x, c] =
+        min_{dy, dx} input[b,
+                           strides[1] * y - rates[1] * dy,
+                           strides[2] * x - rates[2] * dx,
+                           c] -
+                     filter[dy, dx, c]
+
+Dilation and erosion are dual to each other. The dilation of the input signal
+`f` by the structuring signal `g` is equal to the negation of the erosion of
+`-f` by the reflected `g`, and vice versa.
+
+Striding and padding is carried out in exactly the same way as in standard
+convolution. Please refer to the `Convolution` section for details.
+
+@@dilation2d
+@@erosion2d
 
 ## Normalization
 
@@ -152,8 +196,10 @@ TensorFlow provides several operations that help you perform classification.
 
 @@sigmoid_cross_entropy_with_logits
 @@softmax
+@@log_softmax
 @@softmax_cross_entropy_with_logits
 @@sparse_softmax_cross_entropy_with_logits
+@@weighted_cross_entropy_with_logits
 
 ## Embeddings
 
@@ -162,6 +208,23 @@ tensors.
 
 @@embedding_lookup
 @@embedding_lookup_sparse
+
+## Recurrent Neural Networks
+
+TensorFlow provides a number of methods for constructing Recurrent
+Neural Networks.  Most accept an `RNNCell`-subclassed object
+(see the documentation for `tf.nn.rnn_cell`).
+
+@@dynamic_rnn
+@@rnn
+@@state_saving_rnn
+@@bidirectional_rnn
+
+## Conectionist Temporal Classification (CTC)
+
+@@ctc_loss
+@@ctc_greedy_decoder
+@@ctc_beam_search_decoder
 
 ## Evaluation
 
@@ -212,12 +275,12 @@ from __future__ import print_function
 
 from six.moves import xrange  # pylint: disable=redefined-builtin
 
+from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import candidate_sampling_ops
-from tensorflow.python.ops import constant_op
 from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import embedding_ops
 from tensorflow.python.ops import init_ops
@@ -235,7 +298,9 @@ from tensorflow.python.ops.math_ops import tanh
 from tensorflow.python.util.all_util import make_all
 
 # Bring more nn-associated functionality into this package.
+# go/tf-wildcard-import
 # pylint: disable=wildcard-import
+from tensorflow.python.ops.ctc_ops import *
 from tensorflow.python.ops.nn_ops import *
 from tensorflow.python.ops.candidate_sampling_ops import *
 from tensorflow.python.ops.embedding_ops import *
@@ -260,7 +325,14 @@ def sigmoid_cross_entropy_with_logits(logits, targets, name=None):
       = (1 - z) * x + log(1 + exp(-x))
       = x - x * z + log(1 + exp(-x))
 
-  To ensure stability and avoid overflow, the implementation uses
+  For x < 0, to avoid overflow in exp(-x), we reformulate the above
+
+        x - x * z + log(1 + exp(-x))
+      = log(exp(x)) - x * z + log(1 + exp(-x))
+      = - x * z + log(1 + exp(x))
+
+  Hence, to ensure stability and avoid overflow, the implementation uses this
+  equivalent formulation
 
       max(x, 0) - x * z + log(1 + exp(-abs(x)))
 
@@ -292,11 +364,88 @@ def sigmoid_cross_entropy_with_logits(logits, targets, name=None):
     #   x - x * z + log(1 + exp(-x))
     # For x < 0, a more numerically stable formula is
     #   -x * z + log(1 + exp(x))
-    # To avoid branching, we use the combined version
+    # Note that these two expressions can be combined into the following:
     #   max(x, 0) - x * z + log(1 + exp(-abs(x)))
-    return math_ops.add(nn_ops.relu(logits) - logits * targets,
-                        math_ops.log(1 + math_ops.exp(-math_ops.abs(logits))),
+    # To allow computing gradients at zero, we define custom versions of max and
+    # abs functions.
+    zeros = array_ops.zeros_like(logits, dtype=logits.dtype)
+    cond = (logits >= zeros)
+    relu_logits = math_ops.select(cond, logits, zeros)
+    neg_abs_logits = math_ops.select(cond, -logits, logits)
+    return math_ops.add(relu_logits - logits * targets,
+                        math_ops.log(1 + math_ops.exp(neg_abs_logits)),
                         name=name)
+
+
+def weighted_cross_entropy_with_logits(logits, targets, pos_weight,
+                                       name=None):
+  """Computes a weighted cross entropy.
+
+  This is like `sigmoid_cross_entropy_with_logits()` except that `pos_weight`,
+  allows one to trade off recall and precision by up- or down-weighting the
+  cost of a positive error relative to a negative error.
+
+  The usual cross-entropy cost is defined as:
+
+    targets * -log(sigmoid(logits)) + (1 - targets) * -log(1 - sigmoid(logits))
+
+  The argument `pos_weight` is used as a multiplier for the positive targets:
+
+    targets * -log(sigmoid(logits)) * pos_weight +
+        (1 - targets) * -log(1 - sigmoid(logits))
+
+  For brevity, let `x = logits`, `z = targets`, `q = pos_weight`.
+  The loss is:
+
+        qz * -log(sigmoid(x)) + (1 - z) * -log(1 - sigmoid(x))
+      = qz * -log(1 / (1 + exp(-x))) + (1 - z) * -log(exp(-x) / (1 + exp(-x)))
+      = qz * log(1 + exp(-x)) + (1 - z) * (-log(exp(-x)) + log(1 + exp(-x)))
+      = qz * log(1 + exp(-x)) + (1 - z) * (x + log(1 + exp(-x))
+      = (1 - z) * x + (qz +  1 - z) * log(1 + exp(-x))
+      = (1 - z) * x + (1 + (q - 1) * z) * log(1 + exp(-x))
+
+  Setting `l = (1 + (q - 1) * z)`, to ensure stability and avoid overflow,
+  the implementation uses
+
+      (1 - z) * x + l * (log(1 + exp(-abs(x))) + max(-x, 0))
+
+  `logits` and `targets` must have the same type and shape.
+
+  Args:
+    logits: A `Tensor` of type `float32` or `float64`.
+    targets: A `Tensor` of the same type and shape as `logits`.
+    pos_weight: A coefficient to use on the positive examples.
+    name: A name for the operation (optional).
+
+  Returns:
+    A `Tensor` of the same shape as `logits` with the componentwise
+    weightedlogistic losses.
+
+  Raises:
+    ValueError: If `logits` and `targets` do not have the same shape.
+  """
+  with ops.op_scope([logits, targets], name, "logistic_loss") as name:
+    logits = ops.convert_to_tensor(logits, name="logits")
+    targets = ops.convert_to_tensor(targets, name="targets")
+    try:
+      targets.get_shape().merge_with(logits.get_shape())
+    except ValueError:
+      raise ValueError(
+          "logits and targets must have the same shape (%s vs %s)"
+          % (logits.get_shape(), targets.get_shape()))
+
+    # The logistic loss formula from above is
+    #   (1 - z) * x + (1 + (q - 1) * z) * log(1 + exp(-x))
+    # For x < 0, a more numerically stable formula is
+    #   (1 - z) * x + (1 + (q - 1) * z) * log(1 + exp(x)) - l * x
+    # To avoid branching, we use the combined version
+    #   (1 - z) * x + l * (log(1 + exp(-abs(x))) + max(-x, 0))
+    log_weight = 1 + (pos_weight - 1) * targets
+    return math_ops.add(
+        (1 - targets) * logits,
+        log_weight * (math_ops.log(1 + math_ops.exp(-math_ops.abs(logits))) +
+                      nn_ops.relu(-logits)),
+        name=name)
 
 
 def relu_layer(x, weights, biases, name=None):
@@ -399,6 +548,7 @@ def depthwise_conv2d(input, filter, strides, padding, name=None):
     strides: 1-D of size 4.  The stride of the sliding window for each
       dimension of `input`.
     padding: A string, either `'VALID'` or `'SAME'`.  The padding algorithm.
+      See the [comment here](https://www.tensorflow.org/api_docs/python/nn.html#convolution)
     name: A name for this operation (optional).
 
   Returns:
@@ -427,18 +577,8 @@ def depthwise_conv2d(input, filter, strides, padding, name=None):
     if in_channels == 1:
       return nn_ops.conv2d(input, filter, strides, padding, name=name)
     else:
-      # Create one separate convolution per channel.
-      convs = []
-      for channel in xrange(in_channels):
-        with ops.name_scope("depth%d" % channel) as channel_scope:
-          t_in = array_ops.slice(input, [0, 0, 0, channel], [-1, -1, -1, 1],
-                                 name="slice_inputs")
-          f_in = array_ops.slice(filter, [0, 0, channel, 0], [-1, -1, 1, -1],
-                                 name="slice_params")
-          convs.append(nn_ops.conv2d(t_in, f_in,
-                                     strides, padding, name=channel_scope))
-      # Concatenate the per-channel convolutions along the channel dimension.
-      return array_ops.concat(3, convs, name=name)
+      return nn_ops.depthwise_conv2d_native(input, filter, strides, padding,
+                                            name=name)
 
 
 def separable_conv2d(input, depthwise_filter, pointwise_filter, strides,
@@ -474,10 +614,15 @@ def separable_conv2d(input, depthwise_filter, pointwise_filter, strides,
     strides: 1-D of size 4.  The strides for the depthwise convolution for
       each dimension of `input`.
     padding: A string, either `'VALID'` or `'SAME'`.  The padding algorithm.
+      See the [comment here](https://www.tensorflow.org/api_docs/python/nn.html#convolution)
     name: A name for this operation (optional).
 
   Returns:
     A 4-D `Tensor` of shape `[batch, out_height, out_width, out_channels]`.
+
+  Raises:
+    ValueError: If channel_multiplier * in_channels > out_channels,
+      which means that the separable convolution is overparameterized.
   """
   with ops.op_scope([input, depthwise_filter, pointwise_filter],
                    name, "separable_conv2d") as name:
@@ -495,32 +640,35 @@ def separable_conv2d(input, depthwise_filter, pointwise_filter, strides,
         channel_multiplier = depthwise_filter.get_shape()[3]
         in_channels = input.get_shape()[3]
         out_channels = pointwise_filter.get_shape()[3]
-        # This would mean the separable convolutions is over-parametrized.
-        assert channel_multiplier * in_channels < out_channels
+        if channel_multiplier * in_channels > out_channels:
+          raise ValueError(
+              ("Refusing to perform an overparameterized separable "
+               "convolution: channel_multiplier * in_channels = "
+               "%d * %d = %d > %d = out_channels" %
+               (channel_multiplier, in_channels,
+                channel_multiplier * in_channels, out_channels)))
     # The layout of the ops in the graph are expected to be as follows:
+    # depthwise_conv2d  // Conv2D op corresponding to native deptwise conv.
     # separable_conv2d  // Conv2D op corresponding to the pointwise conv.
-    # separable_conv2d/depthwise  // Concat op for the deptwise outputs.
-    # separable_conv2d/depthwise/depth0  // Conv2D op for depth 0
-    # separable_conv2d/depthwise/depth1  // Conv2D op for depth 1
-    # separable_conv2d/depthwise/depth2  // Conv2D op for depth 2
-    depthwise = depthwise_conv2d(input, depthwise_filter, strides,
-                                 padding, name="depthwise")
+    depthwise = nn_ops.depthwise_conv2d_native(input, depthwise_filter, strides,
+                                               padding, name="depthwise")
     return nn_ops.conv2d(depthwise, pointwise_filter, [1, 1, 1, 1],
                          padding="VALID", name=name)
 
 
-def sufficient_statistics(x, axes, shift=True, keep_dims=False, name=None):
+def sufficient_statistics(x, axes, shift=None, keep_dims=False, name=None):
   """Calculate the sufficient statistics for the mean and variance of `x`.
 
   These sufficient statistics are computed using the one pass algorithm on
-  an input that's optionally shifted using the value of the 1st element in `x`.
-  See:
+  an input that's optionally shifted. See:
   https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Computing_shifted_data
 
   Args:
     x: A `Tensor`.
     axes: Array of ints. Axes along which to compute mean and variance.
-    shift: If true, shift the data to provide more numerically stable results.
+    shift: A `Tensor` containing the value by which to shift the data for
+      numerical stability, or `None` if no shift is to be performed. A shift
+      close to the true mean provides the most numerically stable results.
     keep_dims: produce statistics with the same dimensionality as the input.
     name: Name used to scope the operations that compute the sufficient stats.
 
@@ -529,9 +677,9 @@ def sufficient_statistics(x, axes, shift=True, keep_dims=False, name=None):
     * the count (number of elements to average over).
     * the (possibly shifted) sum of the elements in the array.
     * the (possibly shifted) sum of squares of the elements in the array.
-    * the shift by which the mean must be corrected or None if `shift` is False.
+    * the shift by which the mean must be corrected or None if `shift` is None.
   """
-  with ops.op_scope([x, axes], name, "sufficient_statistics"):
+  with ops.op_scope([x, axes, shift], name, "sufficient_statistics"):
     x = ops.convert_to_tensor(x, name="x")
     x_shape = x.get_shape()
     if x_shape.is_fully_defined():
@@ -554,23 +702,16 @@ def sufficient_statistics(x, axes, shift=True, keep_dims=False, name=None):
           math_ops.reduce_prod(x_shape / m_shape),
           x.dtype,
           name="count")
-    if shift:
-      shift_value = array_ops.slice(x, array_ops.zeros_like(m_shape), m_shape)
-      m_ss = math_ops.sub(x, shift_value)
-      v_ss = math_ops.squared_difference(x, shift_value)
-      if keep_dims:
-        shift_value = array_ops.identity(shift_value, name="shift")
-      else:
-        shift_value = array_ops.squeeze(shift_value,
-                                        squeeze_dims=axes,
-                                        name="shift")
-    else:  # not shift.
+    if shift is not None:
+      shift = ops.convert_to_tensor(shift, name="shift")
+      m_ss = math_ops.sub(x, shift)
+      v_ss = math_ops.squared_difference(x, shift)
+    else:  # no shift.
       m_ss = x
       v_ss = math_ops.square(x)
-      shift_value = None
     m_ss = math_ops.reduce_sum(m_ss, axes, keep_dims=keep_dims, name="mean_ss")
     v_ss = math_ops.reduce_sum(v_ss, axes, keep_dims=keep_dims, name="var_ss")
-  return counts, m_ss, v_ss, shift_value
+  return counts, m_ss, v_ss, shift
 
 
 def normalize_moments(counts, mean_ss, variance_ss, shift, name=None):
@@ -604,7 +745,7 @@ def normalize_moments(counts, mean_ss, variance_ss, shift, name=None):
   return (mean, variance)
 
 
-def moments(x, axes, name=None, keep_dims=False):
+def moments(x, axes, shift=None, name=None, keep_dims=False):
   """Calculate the mean and variance of `x`.
 
   The mean and variance are calculated by aggregating the contents of `x`
@@ -621,15 +762,19 @@ def moments(x, axes, name=None, keep_dims=False):
     x: A `Tensor`.
     axes: array of ints.  Axes along which to compute mean and
       variance.
+    shift: A `Tensor` containing the value by which to shift the data for
+      numerical stability, or `None` if no shift is to be performed. A shift
+      close to the true mean provides the most numerically stable results.
     keep_dims: produce moments with the same dimensionality as the input.
     name: Name used to scope the operations that compute the moments.
 
   Returns:
     Two `Tensor` objects: `mean` and `variance`.
   """
-  with ops.op_scope([x, axes], name, "moments"):
+  with ops.op_scope([x, axes, shift], name, "moments"):
     counts, m_ss, v_ss, shift = sufficient_statistics(x,
                                                       axes,
+                                                      shift=shift,
                                                       keep_dims=keep_dims,
                                                       name=name)
     return normalize_moments(counts, m_ss, v_ss, shift, name=name)
@@ -646,9 +791,9 @@ def batch_normalization(x,
 
   As described in http://arxiv.org/abs/1502.03167.
   Normalizes a tensor by `mean` and `variance`, and applies (optionally) a
-  `scale` \\\\(\gamma\\\\) to it, as well as an `offest` \\\\(\beta\\\\):
+  `scale` \\\\(\gamma\\\\) to it, as well as an `offset` \\\\(\\beta\\\\):
 
-  \\\\(\frac{\gamma(x-\mu)}{\sigma}+\beta\\\\)
+  \\\\(\\frac{\gamma(x-\mu)}{\sigma}+\\beta\\\\)
 
   `mean`, `variance`, `offset` and `scale` are all expected to be of one of two
   shapes:
@@ -673,7 +818,7 @@ def batch_normalization(x,
     x: Input `Tensor` of arbitrary dimensionality.
     mean: A mean `Tensor`.
     variance: A variance `Tensor`.
-    offset: An offset `Tensor`, often denoted \\\\(\beta\\\\) in equations, or
+    offset: An offset `Tensor`, often denoted \\\\(\\beta\\\\) in equations, or
       None. If present, will be added to the normalized tensor.
     scale: A scale `Tensor`, often denoted \\\\(\gamma\\\\) in equations, or
       `None`. If present, the scale is applied to the normalized tensor.
@@ -984,7 +1129,7 @@ def sampled_softmax_loss(weights, biases, inputs, labels, num_sampled,
   the full softmax loss.
 
   At inference time, you can compute full softmax probabilities with the
-  expression `tf.nn.softmax(tf.matmul(inputs, weights) + biases)`.
+  expression `tf.nn.softmax(tf.matmul(inputs, tf.transpose(weights)) + biases)`.
 
   See our [Candidate Sampling Algorithms Reference]
   (../../extras/candidate_sampling.pdf)
@@ -1048,14 +1193,10 @@ __all__.extend([
     "all_candidate_sampler",
     "batch_norm_with_global_normalization",
     "batch_normalization",
-    "bidirectional_rnn",
     "conv2d_backprop_filter",
     "conv2d_backprop_input",
     "depthwise_conv2d_native",
-    "dynamic_rnn",
     "lrn",
     "relu_layer",
-    "rnn",
-    "state_saving_rnn",
     "xw_plus_b",
 ])

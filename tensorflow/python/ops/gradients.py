@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,13 +25,13 @@ import warnings
 import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
 
+from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.framework import tensor_util
 from tensorflow.python.ops import array_grad  # pylint: disable=unused-import
 from tensorflow.python.ops import array_ops
-from tensorflow.python.ops import constant_op
 from tensorflow.python.ops import control_flow_grad  # pylint: disable=unused-import
 from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import image_grad  # pylint: disable=unused-import
@@ -42,7 +42,7 @@ from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import linalg_ops
 from tensorflow.python.ops import functional_ops
 
-from tensorflow.python.platform import logging
+from tensorflow.python.platform import tf_logging as logging
 
 # Warn the user if we convert a sparse representation to dense with at
 # least this number of elements.
@@ -155,8 +155,8 @@ def _PendingCount(graph, to_ops, from_ops):
   Returns:
     A tuple containing: (1) a list of integers indexed by operation id,
     indicating the number of backprop inputs to this operation, and (2)
-    a boolean which is True if any of the ops in between from_ops and to_ops
-    contain control flow loops.
+    a ControlFlowState object which is not None if the ops between from_ops
+    and to_ops contain control flow loops.
   """
   # Mark reachable ops from from_ops.
   reached_ops = [False] * (graph._last_id + 1)
@@ -311,7 +311,7 @@ def gradients(ys,
               colocate_gradients_with_ops=False,
               gate_gradients=False,
               aggregation_method=None):
-  """Constructs symbolic partial derivatives of `ys` w.r.t. x in `xs`.
+  """Constructs symbolic partial derivatives of sum of `ys` w.r.t. x in `xs`.
 
   `ys` and `xs` are each a `Tensor` or a list of tensors.  `grad_ys`
   is a list of `Tensor`, holding the gradients received by the
@@ -463,7 +463,7 @@ def gradients(ys,
               if loop_state:
                 out_grads[i] = loop_state.ZerosLike(op, i)
               else:
-                out_grads[i] = array_ops.zeros_like(op.outputs[i])
+                out_grads[i] = control_flow_ops.ZerosLikeOutsideLoop(op, i)
           with ops.name_scope(op.name + "_grad"):
             # pylint: disable=protected-access
             with ops.get_default_graph()._original_op(op):
@@ -483,29 +483,20 @@ def gradients(ys,
               if gate_gradients and len(
                   [x for x in in_grads if x is not None]) > 1:
                 in_grads = control_flow_ops.tuple(in_grads)
-          logging.vlog(1, "Gradient for '" + op.name + "'")
-          def _FilterGrad(x):
-            if x is None:
-              return False
-            if isinstance(x, (list, tuple)):
-              return bool(x)
-            else:
-              return True
-          logging.vlog(1, "  in  --> %s",
-                       ", ".join([x.name for x in out_grads if _FilterGrad(x)]))
-          logging.vlog(1, "  out --> %s",
-                       ", ".join([x.name for x in in_grads if _FilterGrad(x)]))
+          _LogOpGradients(op, out_grads, in_grads)
         else:
           # If no grad_fn is defined or none of out_grads is available,
           # just propagates a list of None backwards.
           in_grads = [None] * len(op.inputs)
         for t_in, in_grad in zip(op.inputs, in_grads):
           if in_grad is not None:
+            if isinstance(in_grad, ops.Tensor):
+              in_grad.set_shape(t_in.get_shape())
             _SetGrad(grads, t_in, in_grad)
         if loop_state:
           loop_state.ExitGradWhileContext(op, before=False)
 
-      # update pending count for the inputs of op.
+      # update pending count for the inputs of op and enqueue ready ops.
       # pylint: disable=protected-access
       for x in op.inputs:
         pending_count[x.op._id] -= 1
@@ -520,6 +511,9 @@ def gradients(ys,
         if pending_count[x._id] is 0:
           queue.append(x)
       # pylint: enable=protected-access
+
+  if loop_state:
+    loop_state.PostProcessing()
   return [_GetGrad(grads, x) for x in xs]
 
 
@@ -577,6 +571,22 @@ def _AccumulatorShape(inputs):
   return shape
 
 
+def _LogOpGradients(op, out_grads, in_grads):
+  """Log the in and out grads of an op."""
+  logging.vlog(1, "Gradient for '" + op.name + "'")
+  def _FilterGrad(x):
+    if x is None:
+      return False
+    if isinstance(x, (list, tuple)):
+      return bool(x)
+    else:
+      return True
+  logging.vlog(1, "  in  --> %s",
+               ", ".join([x.name for x in out_grads if _FilterGrad(x)]))
+  logging.vlog(1, "  out --> %s",
+               ", ".join([x.name for x in in_grads if _FilterGrad(x)]))
+
+
 class AggregationMethod(object):
   """A class listing aggregation methods used to combine gradients.
 
@@ -632,19 +642,20 @@ def _AggregatedGrads(grads, op, loop_state, aggregation_method=None):
         assert control_flow_ops.IsLoopSwitch(op)
         continue
     # Grads have to be Tensors or IndexedSlices
-    if not all([isinstance(g, (ops.Tensor, ops.IndexedSlices))
-                for g in out_grad if g is not None]):
+    if (out_grad is None or
+        not all([isinstance(g, (ops.Tensor, ops.IndexedSlices))
+                 for g in out_grad if g is not None])):
       raise TypeError("gradients have to be either all Tensors "
                       "or all IndexedSlices")
     # Aggregate multiple gradients, and convert [] to None.
     if out_grad:
-      if all([isinstance(g, ops.Tensor) for g in out_grad if g is not None]):
+      if len(out_grad) < 2:
+        used = "nop"
+        out_grads[i] = out_grad[0]
+      elif all([isinstance(g, ops.Tensor) for g in out_grad if g is not None]):
         tensor_shape = _AccumulatorShape(out_grad)
-        if len(out_grad) < 2:
-          used = "nop"
-          out_grads[i] = out_grad[0]
-        elif (aggregation_method == AggregationMethod.EXPERIMENTAL_ACCUMULATE_N
-              and len(out_grad) > 2 and tensor_shape.is_fully_defined()):
+        if (aggregation_method == AggregationMethod.EXPERIMENTAL_ACCUMULATE_N
+            and len(out_grad) > 2 and tensor_shape.is_fully_defined()):
           # The benefit of using AccumulateN is that its inputs can be combined
           # in any order and this can allow the expression to be evaluated with
           # a smaller memory footprint.  When used with gpu_allocator_retry,

@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ limitations under the License.
 #include <map>
 #include <memory>
 #include <vector>
-#include "tensorflow/core/common_runtime/gpu/visitable_allocator.h"
+#include "tensorflow/core/common_runtime/visitable_allocator.h"
 #include "tensorflow/core/lib/core/bits.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
@@ -34,14 +34,6 @@ limitations under the License.
 #include "tensorflow/core/platform/types.h"
 
 namespace tensorflow {
-
-// Interface of an object that does the underlying alloc/free of memory.
-class SubAllocator {
- public:
-  virtual ~SubAllocator() {}
-  virtual void* Alloc(size_t alignment, size_t num_bytes) = 0;
-  virtual void Free(void* ptr, size_t num_bytes) = 0;
-};
 
 // Interface of an object that rounds up integers.
 class RoundUpInterface {

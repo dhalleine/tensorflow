@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -77,6 +77,65 @@ TEST(SparseTensorTest, DimComparatorSorts) {
   std::sort(sorting.begin(), sorting.end(), sorter1);
 
   EXPECT_EQ(sorting, std::vector<int64>({0, 3, 2, 1, 4}));
+}
+
+TEST(SparseTensorTest, SparseTensorInvalidIndicesType) {
+  int N = 5;
+  const int NDIM = 3;
+  Tensor ix(DT_INT32, TensorShape({N, NDIM}));
+  Tensor vals(DT_STRING, TensorShape({N}));
+
+  EXPECT_DEATH(SparseTensor(ix, vals, TensorShape({10, 10, 10}), {0, 1, 2}),
+               "indices must be type int64");
+}
+
+TEST(SparseTensorTest, SparseTensorInvalidIndicesShape) {
+  int N = 5;
+  const int NDIM = 3;
+  Tensor ix(DT_INT64, TensorShape({N, NDIM, 1}));
+  Tensor vals(DT_STRING, TensorShape({N}));
+
+  EXPECT_DEATH(SparseTensor(ix, vals, TensorShape({10, 10, 10}), {0, 1, 2}),
+               "indices must be a matrix");
+}
+
+TEST(SparseTensorTest, SparseTensorInvalidValues) {
+  int N = 5;
+  const int NDIM = 3;
+  Tensor ix(DT_INT64, TensorShape({N, NDIM}));
+  Tensor vals(DT_STRING, TensorShape({N, 1}));
+
+  EXPECT_DEATH(SparseTensor(ix, vals, TensorShape({10, 10, 10}), {0, 1, 2}),
+               "vals must be a vec");
+}
+
+TEST(SparseTensorTest, SparseTensorInvalidN) {
+  int N = 5;
+  const int NDIM = 3;
+  Tensor ix(DT_INT64, TensorShape({N, NDIM}));
+  Tensor vals(DT_STRING, TensorShape({N - 1}));
+
+  EXPECT_DEATH(SparseTensor(ix, vals, TensorShape({10, 10, 10}), {0, 1, 2}),
+               "indices and values rows .* must match");
+}
+
+TEST(SparseTensorTest, SparseTensorInvalidOrder) {
+  int N = 5;
+  const int NDIM = 3;
+  Tensor ix(DT_INT64, TensorShape({N, NDIM}));
+  Tensor vals(DT_STRING, TensorShape({N}));
+
+  EXPECT_DEATH(SparseTensor(ix, vals, TensorShape({10, 10, 10}), {0, 1}),
+               "Order length must be SparseTensor rank");
+}
+TEST(SparseTensorTest, SparseTensorInvalidShape) {
+  int N = 5;
+  const int NDIM = 3;
+  Tensor ix(DT_INT64, TensorShape({N, NDIM}));
+  Tensor vals(DT_STRING, TensorShape({N}));
+
+  EXPECT_DEATH(SparseTensor(ix, vals, TensorShape({10, 10}), {0, 1, 2}),
+               "Shape rank must be SparseTensor rank");
 }
 
 TEST(SparseTensorTest, SparseTensorConstruction) {

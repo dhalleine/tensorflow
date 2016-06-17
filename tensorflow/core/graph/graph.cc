@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -49,6 +49,8 @@ Node::Node()
     : id_(-1),
       cost_id_(-1),
       class_(NC_UNINITIALIZED),
+      is_host_send_(false),
+      is_host_recv_(false),
       props_(nullptr),
       assigned_device_name_() {}
 
@@ -95,10 +97,19 @@ void Node::Initialize(int id, int cost_id, Properties* props) {
   SET_CLASS(NC_CONSTANT, ts, "Const", "HostConst");
   SET_CLASS(NC_VARIABLE, ts, "Variable", "");
   SET_CLASS(NC_IDENTITY, ts, "Identity", "RefIdentity");
+  SET_CLASS(NC_GET_SESSION_HANDLE, ts, "GetSessionHandle", "");
+  SET_CLASS(NC_GET_SESSION_TENSOR, ts, "GetSessionTensor", "");
+  SET_CLASS(NC_DELETE_SESSION_TENSOR, ts, "DeleteSessionTensor", "");
   if (class_ == NC_UNINITIALIZED) {
     class_ = NC_OTHER;  // Catch all
   }
 #undef SET_CLASS
+
+  if (ts == "_HostSend") {
+    is_host_send_ = true;
+  } else if (ts == "_HostRecv") {
+    is_host_recv_ = true;
+  }
 }
 
 void Node::Clear() {
@@ -124,6 +135,22 @@ gtl::iterator_range<NeighborIter> Node::out_nodes() const {
 gtl::iterator_range<NeighborIter> Node::in_nodes() const {
   return gtl::make_range(NeighborIter(in_edges_.begin(), true),
                          NeighborIter(in_edges_.end(), true));
+}
+
+void Node::MaybeCopyOnWrite() {
+  // Properties may be shared between Nodes. Make a copy if so.
+  if (!props_->RefCountIsOne()) {
+    Properties* new_props =
+        new Properties(props_->op_def_, props_->node_def_, props_->input_types_,
+                       props_->output_types_);
+    props_->Unref();
+    props_ = new_props;
+  }
+}
+
+void Node::ClearAttr(const string& name) {
+  MaybeCopyOnWrite();
+  (*props_->node_def_.mutable_attr()).erase(name);
 }
 
 // Node::Properties
@@ -178,8 +205,9 @@ Graph::~Graph() {
 }
 
 Node* Graph::AddNode(const NodeDef& node_def, Status* status) {
-  const OpDef* op_def = ops_->LookUp(node_def.op(), status);
-  if (op_def == nullptr) return nullptr;
+  const OpDef* op_def;
+  status->Update(ops_->LookUpOpDef(node_def.op(), &op_def));
+  if (!status->ok()) return nullptr;
 
   DataTypeVector inputs;
   DataTypeVector outputs;

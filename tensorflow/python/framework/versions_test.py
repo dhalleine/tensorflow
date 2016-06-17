@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ class VersionTest(tf.test.TestCase):
   def testVersion(self):
     self.assertEqual(type(tf.__version__), str)
     # This pattern will need to grow as we include alpha, builds, etc.
-    self.assertRegexpMatches(tf.__version__, r'^\d+\.\d+\.\d+$')
+    self.assertRegexpMatches(tf.__version__, r'^\d+\.\d+\.\w+$')
 
   def testGraphDefVersion(self):
     version = tf.GRAPH_DEF_VERSION

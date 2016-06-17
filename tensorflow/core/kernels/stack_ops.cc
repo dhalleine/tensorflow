@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,7 +26,9 @@ limitations under the License.
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_shape.h"
 #include "tensorflow/core/framework/types.h"
+#include "tensorflow/core/lib/core/refcount.h"
 #include "tensorflow/core/lib/core/errors.h"
+#include "tensorflow/core/lib/core/refcount.h"
 #include "tensorflow/core/lib/gtl/map_util.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
@@ -170,10 +172,11 @@ class StackPushOp : public AsyncOpKernel {
     OP_REQUIRES_OK(context, context->GetAttr("swap_memory", &swap_memory_));
   }
 
-  void ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
+  void ComputeAsync(OpKernelContext* ctx, DoneCallback done) override {
     // Get the stack from the handle.
     Stack* stack = nullptr;
     OP_REQUIRES_OK(ctx, GetStack(ctx, &stack));
+    core::ScopedUnref unref(stack);
     OP_REQUIRES(ctx, ctx->input_dtype(1) == stack->ElemType(),
                 errors::InvalidArgument("Must have type ", stack->ElemType(),
                                         " but got ", ctx->input_dtype(1)));
@@ -269,10 +272,11 @@ class StackPopOp : public AsyncOpKernel {
  public:
   explicit StackPopOp(OpKernelConstruction* context) : AsyncOpKernel(context) {}
 
-  void ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
+  void ComputeAsync(OpKernelContext* ctx, DoneCallback done) override {
     // Get the stack from the handle.
     Stack* stack = nullptr;
     OP_REQUIRES_OK(ctx, GetStack(ctx, &stack));
+    core::ScopedUnref unref(stack);
 
     // Pop the tensor. Transfer the tensor back to device if it was
     // swapped out to CPU.
@@ -341,6 +345,7 @@ class StackCloseOp : public OpKernel {
   void Compute(OpKernelContext* ctx) override {
     Stack* stack = nullptr;
     OP_REQUIRES_OK(ctx, GetStack(ctx, &stack));
+    core::ScopedUnref unref(stack);
     stack->Close();
   }
 

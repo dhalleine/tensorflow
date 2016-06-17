@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,39 +20,13 @@ from __future__ import print_function
 
 import numpy as np
 
+from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import test_util
-from tensorflow.python.ops import constant_op
 from tensorflow.python.ops import math_ops
 from tensorflow.python.platform import googletest
 
 exp = np.exp
 log = np.log
-
-
-class LBetaTest(test_util.TensorFlowTestCase):
-
-  def testOneDimensionalArg(self):
-    # Should evaluate to 1 and 1/2.
-    x_one = [1, 1.]
-    x_one_half = [2, 1.]
-    with self.test_session():
-      self.assertAllClose(1, exp(math_ops.lbeta(x_one).eval()))
-      self.assertAllClose(0.5, exp(math_ops.lbeta(x_one_half).eval()))
-
-  def testTwoDimensionalArg(self):
-    # Should evaluate to 1/2.
-    x_one_half = [[2, 1.], [2, 1.]]
-    with self.test_session():
-      self.assertAllClose([0.5, 0.5], exp(math_ops.lbeta(x_one_half).eval()))
-
-  def testLengthOneLastDimensionResultsInOne(self):
-    # If there is only one coefficient, the formula still works, and we get one
-    # as the answer, alwyas.
-    x_a = [5.5]
-    x_b = [0.1]
-    with self.test_session():
-      self.assertAllClose(1, exp(math_ops.lbeta(x_a).eval()))
-      self.assertAllClose(1, exp(math_ops.lbeta(x_b).eval()))
 
 
 class ReduceTest(test_util.TensorFlowTestCase):
@@ -110,12 +84,13 @@ class ModTest(test_util.TensorFlowTestCase):
 class SquaredDifferenceTest(test_util.TensorFlowTestCase):
 
   def testSquaredDifference(self):
-    x = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
-    y = np.array([-3, -2, -1], dtype=np.int32)
-    z = (x - y)*(x - y)
-    with self.test_session():
-      z_tf = math_ops.squared_difference(x, y).eval()
-      self.assertAllClose(z, z_tf)
+    for dtype in [np.int32, np.float16]:
+      x = np.array([[1, 2, 3], [4, 5, 6]], dtype=dtype)
+      y = np.array([-3, -2, -1], dtype=dtype)
+      z = (x - y)*(x - y)
+      with self.test_session():
+        z_tf = math_ops.squared_difference(x, y).eval()
+        self.assertAllClose(z, z_tf)
 
 if __name__ == "__main__":
   googletest.main()

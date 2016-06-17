@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -54,6 +54,13 @@ class TensorShape {
   TensorShape(const TensorShape& b);
   void operator=(const TensorShape& b);
 
+  /// Move the specified shape.  After moving, <b> is safe for destruction and
+  // can be reassigned into, but its dimensions and number of elements can be
+  // nonsensical (e.g., negative dimension sizes, or number of elements not
+  // properly recomputed).
+  TensorShape(TensorShape&& b);
+  void operator=(TensorShape&& b);
+
   /// Returns `true` iff `proto` is a valid tensor shape.
   static bool IsValid(const TensorShapeProto& proto);
 
@@ -70,6 +77,9 @@ class TensorShape {
 
   /// Appends all the dimensions from `shape`.
   void AppendShape(const TensorShape& shape);
+
+  // Maximum number of dimensions in a tensor.
+  static constexpr int MaxDimensions() { return 255; }
 
   /// \brief Insert a dimension somewhere in the `TensorShape`.
   /// REQUIRES: `0 <= d <= dims()`
@@ -142,6 +152,9 @@ class TensorShape {
   void SlowCopyFrom(const TensorShape& b);
 
   void RecomputeNumElements();
+
+  void CheckDimsEqual(int NDIMS) const;
+  void CheckDimsAtLeast(int NDIMS) const;
 
   // We use 16 bytes to represent a TensorShape.  Because we need to
   // be able to support full 64-bit dimension sizes and an arbitrary
@@ -252,29 +265,12 @@ class TensorShapeUtils {
 
   /// \brief Returns a `TensorShape` whose dimensions are
   /// `dims[0]`, `dims[1]`, ..., `dims[n-1]`.
-  template <typename T>
-  static Status MakeShape(const T* dims, int n, TensorShape* out) {
-    *out = TensorShape();
-    for (int i = 0; i < n; ++i) {
-      if (dims[i] >= 0) {
-        out->AddDim(dims[i]);
-      } else {
-        return errors::InvalidArgument("Dimension ", dims[i], " must be >= 0");
-      }
-    }
-    return Status::OK();
-  }
+  static Status MakeShape(const int32* dims, int64 n, TensorShape* out);
+  static Status MakeShape(const int64* dims, int64 n, TensorShape* out);
+  static Status MakeShape(gtl::ArraySlice<int32> shape, TensorShape* out);
+  static Status MakeShape(gtl::ArraySlice<int64> shape, TensorShape* out);
 
-  static string ShapeListString(const gtl::ArraySlice<TensorShape>& shapes) {
-    string result = "[";
-    bool first = true;
-    for (const TensorShape& shape : shapes) {
-      strings::StrAppend(&result, (first ? "" : ", "), shape.DebugString());
-      first = false;
-    }
-    strings::StrAppend(&result, "]");
-    return result;
-  }
+  static string ShapeListString(const gtl::ArraySlice<TensorShape>& shapes);
 
   static bool StartsWith(const TensorShape& shape0, const TensorShape& shape1);
 };
@@ -285,16 +281,15 @@ class TensorShapeUtils {
 
 template <int NDIMS>
 Eigen::DSizes<Eigen::DenseIndex, NDIMS> TensorShape::AsEigenDSizes() const {
-  CHECK_EQ(NDIMS, dims()) << "Asking for tensor of " << NDIMS
-                          << " for a tensor of " << dims() << " dimensions";
+  CheckDimsEqual(NDIMS);
   return AsEigenDSizesWithPadding<NDIMS>();
 }
 
 template <int NDIMS>
 Eigen::DSizes<Eigen::DenseIndex, NDIMS> TensorShape::AsEigenDSizesWithPadding()
     const {
-  CHECK_GE(NDIMS, dims()) << "Asking for tensor of " << NDIMS
-                          << " for a tensor of " << dims() << " dimensions";
+  CheckDimsAtLeast(NDIMS);
+  static_assert(NDIMS <= TensorShape::MaxDimensions(), "Too many dimensions");
   Eigen::DSizes<Eigen::DenseIndex, NDIMS> dsizes;
   for (int d = 0; d < dims(); d++) {
     dsizes[d] = dim_size(d);
@@ -322,6 +317,15 @@ inline TensorShape::TensorShape(const TensorShape& b) {
   }
 }
 
+inline TensorShape::TensorShape(TensorShape&& b) {
+  num_elements_ = b.num_elements_;
+  memcpy(buf(), b.buf(), sizeof(u_.buf));
+  // memcpy above Implicitly does:
+  //   set_ndims_byte(b.ndims_byte());
+  //   set_tag(b.tag());
+  b.set_tag(REP16);  // other shape no longer owns out-of-line data, if any.
+}
+
 inline TensorShape::~TensorShape() {
   if (tag() == REP_OUT_OF_LINE) {
     DestructorOutOfLine();
@@ -338,6 +342,18 @@ inline void TensorShape::operator=(const TensorShape& b) {
   } else {
     SlowCopyFrom(b);
   }
+}
+
+inline void TensorShape::operator=(TensorShape&& b) {
+  if (tag() == REP_OUT_OF_LINE) {
+    DestructorOutOfLine();
+  }
+  num_elements_ = b.num_elements_;
+  memcpy(buf(), b.buf(), sizeof(u_.buf));
+  // memcpy above Implicitly does:
+  //   set_ndims_byte(b.ndims_byte());
+  //   set_tag(b.tag());
+  b.set_tag(REP16);  // other shape no longer owns out-of-line data, if any.
 }
 
 }  // namespace tensorflow

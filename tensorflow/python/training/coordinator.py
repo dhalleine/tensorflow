@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,7 +24,8 @@ import time
 
 import six
 
-from tensorflow.python.platform import logging
+from tensorflow.python.framework import errors
+from tensorflow.python.platform import tf_logging as logging
 from tensorflow.python.util import compat
 
 
@@ -131,29 +132,86 @@ class Coordinator(object):
     # Event set when threads must stop.
     self._stop_event = threading.Event()
     # Python exc_info to report.
+    # If not None, it should hold the returned value of sys.exc_info(), which is
+    # a tuple containing exception (type, value, traceback).
     self._exc_info_to_raise = None
+
+  def _filter_exception(self, ex):
+    """Check if the exception indicated in 'ex' should be ignored.
+
+    This method examines `ex` to check if it is an exception that should be
+    reported to the users.  If yes, it returns `ex` as is, otherwise it returns
+    None.
+
+    The code returns None for exceptions that are used for control flow such as
+    the OutOfRangeError raised by the dequeue operations to indicate that a
+    queue was closed after its contents were dequeued.
+
+    Args:
+      ex: None, an `Exception`, or a Python `exc_info` tuple as returned by
+        `sys.exc_info()`.
+
+    Returns:
+      ex or None.
+    """
+    if isinstance(ex, tuple):
+      ex2 = ex[1]
+    else:
+      ex2 = ex
+    # OutOfRangeError is used to indicate "end of input".  We do not want to
+    # report an exception for it.  TODO(touts): Likely also need to ignore
+    # some of the Aborted and Cancelled exceptions raised by queue ops after
+    # queues are closed, but this can only be done after these exceptions have
+    # been clearly identified.
+    if isinstance(ex2, (errors.OutOfRangeError)):
+      # Ignore the exception.
+      ex = None
+    return ex
 
   def request_stop(self, ex=None):
     """Request that the threads stop.
 
     After this is called, calls to `should_stop()` will return `True`.
 
+    Note: If an exception is being passed in, in must be in the context of
+    handling the exception (i.e. `try: ... except Exception as ex: ...`) and not
+    a newly created one.
+
     Args:
       ex: Optional `Exception`, or Python `exc_info` tuple as returned by
         `sys.exc_info()`.  If this is the first call to `request_stop()` the
         corresponding exception is recorded and re-raised from `join()`.
     """
+    ex = self._filter_exception(ex)
     with self._lock:
       if not self._stop_event.is_set():
         if ex and self._exc_info_to_raise is None:
           if isinstance(ex, tuple):
-            logging.info("Error reported to Coordinator: %s",
+            logging.info("Error reported to Coordinator: %s, %s",
+                         type(ex[1]),
                          compat.as_str_any(ex[1]))
             self._exc_info_to_raise = ex
           else:
-            logging.info("Error reported to Coordinator: %s",
+            logging.info("Error reported to Coordinator: %s, %s",
+                         type(ex),
                          compat.as_str_any(ex))
             self._exc_info_to_raise = sys.exc_info()
+          # self._exc_info_to_raise should contain a tuple containing exception
+          # (type, value, traceback)
+          if (len(self._exc_info_to_raise) != 3 or
+              not self._exc_info_to_raise[0] or
+              not self._exc_info_to_raise[1]):
+            # Raise, catch and record the exception here so that error happens
+            # where expected.
+            try:
+              raise ValueError(
+                  "ex must be a tuple or sys.exc_info must return the current "
+                  "exception: %s"
+                  % self._exc_info_to_raise)
+            except ValueError:
+              # Record this error so it kills the coordinator properly.
+              self._exc_info_to_raise = sys.exc_info()
+
         self._stop_event.set()
 
   def clear_stop(self):
@@ -162,6 +220,7 @@ class Coordinator(object):
     After this is called, calls to `should_stop()` will return `False`.
     """
     with self._lock:
+      self._exc_info_to_raise = None
       if self._stop_event.is_set():
         self._stop_event.clear()
 
@@ -251,9 +310,19 @@ class Coordinator(object):
       pass
 
     # If any thread is still alive, wait for the grace period to expire.
+    # By the time this check is executed, threads may still be shutting down,
+    # so we add a sleep of increasing duration to give them a chance to shut
+    # down without loosing too many cycles.
+    # The sleep duration is limited to the remaining grace duration.
+    stop_wait_secs = 0.001
     while any(t.is_alive() for t in threads) and stop_grace_period_secs >= 0.0:
-      stop_grace_period_secs -= 1.0
-      time.sleep(1.0)
+      time.sleep(stop_wait_secs)
+      stop_grace_period_secs -= stop_wait_secs
+      stop_wait_secs = 2 * stop_wait_secs
+      # Keep the waiting period within sane bounds.
+      # The minimum value is to avoid decreasing stop_wait_secs to a value
+      # that could cause stop_grace_period_secs to remain unchanged.
+      stop_wait_secs = max(min(stop_wait_secs, stop_grace_period_secs), 0.001)
 
     # List the threads still alive after the grace period.
     stragglers = [t.name for t in threads if t.is_alive()]
@@ -285,7 +354,8 @@ class LooperThread(threading.Thread):
   You typically pass looper threads to the supervisor `Join()` method.
   """
 
-  def __init__(self, coord, timer_interval_secs, target=None, args=None):
+  def __init__(self, coord, timer_interval_secs, target=None, args=None,
+               kwargs=None):
     """Create a LooperThread.
 
     Args:
@@ -294,6 +364,7 @@ class LooperThread(threading.Thread):
         if it should be called back to back.
       target: Optional callable object that will be executed in the thread.
       args: Optional arguments to pass to `target` when calling it.
+      kwargs: Optional keyword arguments to pass to `target` when calling it.
 
     Raises:
       ValueError: If one of the arguments is invalid.
@@ -306,15 +377,14 @@ class LooperThread(threading.Thread):
     self._timer_interval_secs = timer_interval_secs
     self._target = target
     if self._target:
-      if args is None:
-        self._args = ()
-      else:
-        self._args = args
-    elif args:
-      raise ValueError("'args' argument require that you also pass 'target'")
+      self._args = args or ()
+      self._kwargs = kwargs or {}
+    elif args or kwargs:
+      raise ValueError("'args' and 'kwargs' argument require that you also "
+                       "pass 'target'")
 
   @staticmethod
-  def loop(coord, timer_interval_secs, target, args=None):
+  def loop(coord, timer_interval_secs, target, args=None, kwargs=None):
     """Start a LooperThread that calls a function periodically.
 
     If `timer_interval_secs` is None the thread calls `target(args)`
@@ -327,11 +397,13 @@ class LooperThread(threading.Thread):
       timer_interval_secs: Number. Time boundaries at which to call `target`.
       target: A callable object.
       args: Optional arguments to pass to `target` when calling it.
+      kwargs: Optional keyword arguments to pass to `target` when calling it.
 
     Returns:
       The started thread.
     """
-    looper = LooperThread(coord, timer_interval_secs, target=target, args=args)
+    looper = LooperThread(coord, timer_interval_secs, target=target, args=args,
+                          kwargs=kwargs)
     looper.start()
     return looper
 
@@ -361,4 +433,4 @@ class LooperThread(threading.Thread):
   def run_loop(self):
     """Called at 'timer_interval_secs' boundaries."""
     if self._target:
-      self._target(*self._args)
+      self._target(*self._args, **self._kwargs)

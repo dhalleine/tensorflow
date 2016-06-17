@@ -1,4 +1,4 @@
-/* Copyright 2016 Google Inc. All Rights Reserved.
+/* Copyright 2016 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -97,8 +97,8 @@ TEST_F(DataByExampleTest, VisitEmpty) {
 }
 
 TEST_F(DataByExampleTest, VisitMany) {
-  const int kNumElements = 2 * VisitChunkSize() + 1;
-  for (int i = 0; i < kNumElements; ++i) {
+  const size_t kNumElements = 2 * VisitChunkSize() + 1;
+  for (size_t i = 0; i < kNumElements; ++i) {
     DataByExample::Data data;
     data.dual = static_cast<float>(i);
     data_by_example_->Set(DataByExample::MakeKey(strings::StrCat(i)), data);
@@ -164,7 +164,6 @@ TEST_F(DataByExampleTest, VisitUnavailable) {
     signal(&updated_data);
   });
   wait(&completed_visit);
-  EXPECT_FALSE(thread_pool.HasPendingClosures());
   EXPECT_TRUE(errors::IsUnavailable(status));
 }
 

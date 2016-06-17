@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,8 +31,119 @@ var: Should be from a Variable().
 alpha: Scaling factor. Must be a scalar.
 delta: The change.
 out: Same as "var".
+use_locking: If `True`, the subtraction will be protected by a lock;
+  otherwise the behavior is undefined, but may exhibit less contention.
+)doc");
+
+REGISTER_OP("ApplyProximalGradientDescent")
+    .Input("var: Ref(T)")
+    .Input("alpha: T")
+    .Input("l1: T")
+    .Input("l2: T")
+    .Input("delta: T")
+    .Output("out: Ref(T)")
+    .Attr("T: numbertype")
+    .Attr("use_locking: bool = false")
+    .Doc(R"doc(
+Update '*var' as FOBOS algorithm with fixed learning rate.
+prox_v = var - alpha * delta
+var = sign(prox_v)/(1+alpha*l2) * max{|prox_v|-alpha*l1,0}
+
+var: Should be from a Variable().
+alpha: Scaling factor. Must be a scalar.
+l1: L1 regularization. Must be a scalar.
+l2: L2 regularization. Must be a scalar.
+delta: The change.
+out: Same as "var".
 use_locking: If True, the subtraction will be protected by a lock;
   otherwise the behavior is undefined, but may exhibit less contention.
+)doc");
+
+REGISTER_OP("SparseApplyProximalGradientDescent")
+    .Input("var: Ref(T)")
+    .Input("alpha: T")
+    .Input("l1: T")
+    .Input("l2: T")
+    .Input("grad: T")
+    .Input("indices: Tindices")
+    .Output("out: Ref(T)")
+    .Attr("T: numbertype")
+    .Attr("Tindices: {int32, int64}")
+    .Attr("use_locking: bool = false")
+    .Doc(R"doc(
+Sparse update '*var' as FOBOS algorithm with fixed learning rate.
+
+That is for rows we have grad for, we update var as follows:
+prox_v = var - alpha * grad
+var = sign(prox_v)/(1+alpha*l2) * max{|prox_v|-alpha*l1,0}
+
+var: Should be from a Variable().
+alpha: Scaling factor. Must be a scalar.
+l1: L1 regularization. Must be a scalar.
+l2: L2 regularization. Must be a scalar.
+grad: The gradient.
+indices: A vector of indices into the first dimension of var and accum.
+out: Same as "var".
+use_locking: If True, the subtraction will be protected by a lock;
+  otherwise the behavior is undefined, but may exhibit less contention.
+)doc");
+
+REGISTER_OP("ApplyAdadelta")
+    .Input("var: Ref(T)")
+    .Input("accum: Ref(T)")
+    .Input("accum_update: Ref(T)")
+    .Input("lr: T")
+    .Input("rho: T")
+    .Input("epsilon: T")
+    .Input("grad: T")
+    .Output("out: Ref(T)")
+    .Attr("T: numbertype")
+    .Attr("use_locking: bool = false")
+    .Doc(R"doc(
+Update '*var' according to the adadelta scheme.
+
+accum = rho() * accum + (1 - rho()) * grad.square();
+update = (update_accum + epsilon).sqrt() * (accum + epsilon()).rsqrt() * grad;
+update_accum = rho() * update_accum + (1 - rho()) * update.square();
+var -= update;
+
+var: Should be from a Variable().
+accum: Should be from a Variable().
+accum_update: Should be from a Variable().
+lr: Scaling factor. Must be a scalar.
+rho: Decay factor. Must be a scalar.
+epsilon: Constant factor. Must be a scalar.
+grad: The gradient.
+out: Same as "var".
+use_locking: If True, updating of the var, accum and update_accum tensors will be protected by
+a lock; otherwise the behavior is undefined, but may exhibit less contention.
+)doc");
+
+REGISTER_OP("SparseApplyAdadelta")
+    .Input("var: Ref(T)")
+    .Input("accum: Ref(T)")
+    .Input("accum_update: Ref(T)")
+    .Input("lr: T")
+    .Input("rho: T")
+    .Input("epsilon: T")
+    .Input("grad: T")
+    .Input("indices: Tindices")
+    .Output("out: Ref(T)")
+    .Attr("T: numbertype")
+    .Attr("Tindices: {int32, int64}")
+    .Attr("use_locking: bool = false")
+    .Doc(R"doc(
+var: Should be from a Variable().
+accum: Should be from a Variable().
+accum_update:: Should be from a Variable().
+lr: Learning rate. Must be a scalar.
+rho: Decay factor. Must be a scalar.
+epsilon: Constant factor. Must be a scalar.
+grad: The gradient.
+indices: A vector of indices into the first dimension of var and accum.
+out: Same as "var".
+use_locking: If True, updating of the var and accum tensors will be protected by
+a lock; otherwise the behavior is undefined, but may exhibit less contention.
 )doc");
 
 REGISTER_OP("ApplyAdagrad")
@@ -53,6 +164,34 @@ var: Should be from a Variable().
 accum: Should be from a Variable().
 lr: Scaling factor. Must be a scalar.
 grad: The gradient.
+out: Same as "var".
+use_locking: If `True`, updating of the var and accum tensors will be protected
+  by a lock; otherwise the behavior is undefined, but may exhibit less
+  contention.
+)doc");
+
+REGISTER_OP("ApplyProximalAdagrad")
+    .Input("var: Ref(T)")
+    .Input("accum: Ref(T)")
+    .Input("lr: T")
+    .Input("l1: T")
+    .Input("l2: T")
+    .Input("grad: T")
+    .Output("out: Ref(T)")
+    .Attr("T: numbertype")
+    .Attr("use_locking: bool = false")
+    .Doc(R"doc(
+Update '*var' and '*accum' according to FOBOS with Adagrad learning rate.
+accum += grad * grad
+prox_v = var - lr * grad * (1 / sqrt(accum))
+var = sign(prox_v)/(1+lr*l2) * max{|prox_v|-lr*l1,0}
+
+var: Should be from a Variable().
+accum: Should be from a Variable().
+grad: The gradient.
+lr: Scaling factor. Must be a scalar.
+l1: L1 regularization. Must be a scalar.
+l2: L2 regularization. Must be a scalar.
 out: Same as "var".
 use_locking: If True, updating of the var and accum tensors will be protected by
 a lock; otherwise the behavior is undefined, but may exhibit less contention.
@@ -78,6 +217,40 @@ var -= lr * grad * (1 / sqrt(accum))
 var: Should be from a Variable().
 accum: Should be from a Variable().
 lr: Learning rate. Must be a scalar.
+grad: The gradient.
+indices: A vector of indices into the first dimension of var and accum.
+out: Same as "var".
+use_locking: If `True`, updating of the var and accum tensors will be protected
+  by a lock; otherwise the behavior is undefined, but may exhibit less
+  contention.
+)doc");
+
+REGISTER_OP("SparseApplyProximalAdagrad")
+    .Input("var: Ref(T)")
+    .Input("accum: Ref(T)")
+    .Input("lr: T")
+    .Input("l1: T")
+    .Input("l2: T")
+    .Input("grad: T")
+    .Input("indices: Tindices")
+    .Output("out: Ref(T)")
+    .Attr("T: numbertype")
+    .Attr("Tindices: {int32, int64}")
+    .Attr("use_locking: bool = false")
+    .Doc(R"doc(
+Sparse update entries in '*var' and '*accum' according to FOBOS algorithm.
+
+That is for rows we have grad for, we update var and accum as follows:
+accum += grad * grad
+prox_v = var
+prox_v -= lr * grad * (1 / sqrt(accum))
+var = sign(prox_v)/(1+lr*l2) * max{|prox_v|-lr*l1,0}
+
+var: Should be from a Variable().
+accum: Should be from a Variable().
+lr: Learning rate. Must be a scalar.
+l1: L1 regularization. Must be a scalar.
+l2: L2 regularization. Must be a scalar.
 grad: The gradient.
 indices: A vector of indices into the first dimension of var and accum.
 out: Same as "var".
@@ -111,12 +284,13 @@ accum: Should be from a Variable().
 linear: Should be from a Variable().
 grad: The gradient.
 lr: Scaling factor. Must be a scalar.
-l1: Scaling factor. Must be a scalar.
-l2: Scaling factor. Must be a scalar.
+l1: L1 regulariation. Must be a scalar.
+l2: L2 regulariation. Must be a scalar.
 lr_power: Scaling factor. Must be a scalar.
 out: Same as "var".
-use_locking: If True, updating of the var and accum tensors will be protected by
-a lock; otherwise the behavior is undefined, but may exhibit less contention.
+use_locking: If `True`, updating of the var and accum tensors will be protected
+  by a lock; otherwise the behavior is undefined, but may exhibit less
+  contention.
 )doc");
 
 REGISTER_OP("SparseApplyFtrl")
@@ -149,12 +323,13 @@ linear: Should be from a Variable().
 grad: The gradient.
 indices: A vector of indices into the first dimension of var and accum.
 lr: Scaling factor. Must be a scalar.
-l1: Scaling factor. Must be a scalar.
-l2: Scaling factor. Must be a scalar.
+l1: L1 regularization. Must be a scalar.
+l2: L2 regularization. Must be a scalar.
 lr_power: Scaling factor. Must be a scalar.
 out: Same as "var".
-use_locking: If True, updating of the var and accum tensors will be protected by
-a lock; otherwise the behavior is undefined, but may exhibit less contention.
+use_locking: If `True`, updating of the var and accum tensors will be protected
+  by a lock; otherwise the behavior is undefined, but may exhibit less
+  contention.
 )doc");
 
 REGISTER_OP("ApplyMomentum")
@@ -178,8 +353,9 @@ lr: Scaling factor. Must be a scalar.
 grad: The gradient.
 momentum: Momentum. Must be a scalar.
 out: Same as "var".
-use_locking: If True, updating of the var and accum tensors will be protected by
-a lock; otherwise the behavior is undefined, but may exhibit less contention.
+use_locking: If `True`, updating of the var and accum tensors will be protected
+  by a lock; otherwise the behavior is undefined, but may exhibit less
+  contention.
 )doc");
 
 REGISTER_OP("SparseApplyMomentum")
@@ -208,8 +384,9 @@ grad: The gradient.
 indices: A vector of indices into the first dimension of var and accum.
 momentum: Momentum. Must be a scalar.
 out: Same as "var".
-use_locking: If True, updating of the var and accum tensors will be protected by
-a lock; otherwise the behavior is undefined, but may exhibit less contention.
+use_locking: If `True`, updating of the var and accum tensors will be protected
+  by a lock; otherwise the behavior is undefined, but may exhibit less
+  contention.
 )doc");
 
 REGISTER_OP("ApplyAdam")
@@ -245,8 +422,9 @@ beta2: Momentum factor. Must be a scalar.
 epsilon: Ridge term. Must be a scalar.
 grad: The gradient.
 out: Same as "var".
-use_locking: If True, updating of the var, m, and v tensors will be protected by
-a lock; otherwise the behavior is undefined, but may exhibit less contention.
+use_locking: If `True`, updating of the var, m, and v tensors will be protected
+  by a lock; otherwise the behavior is undefined, but may exhibit less
+  contention.
 )doc");
 
 REGISTER_OP("ApplyRMSProp")
@@ -263,6 +441,9 @@ REGISTER_OP("ApplyRMSProp")
     .Attr("use_locking: bool = false")
     .Doc(R"doc(
 Update '*var' according to the RMSProp algorithm.
+Note that in dense implement of this algorithm, ms and mom will 
+update even if the grad is zero, but in this sparse implement, ms 
+and mom will not update in iterations the grad is zero.
 
 mean_square = decay * mean_square + (1-decay) * gradient ** 2
 Delta = learning_rate * gradient / sqrt(mean_square + epsilon)
@@ -279,8 +460,50 @@ epsilon: Ridge term. Must be a scalar.
 rho: Decay rate. Must be a scalar.
 grad: The gradient.
 out: Same as "var".
-use_locking: If True, updating of the var, m, and v tensors will be protected by
-a lock; otherwise the behavior is undefined, but may exhibit less contention.
+use_locking: If `True`, updating of the var, m, and v tensors will be protected
+  by a lock; otherwise the behavior is undefined, but may exhibit less
+  contention.
+)doc");
+  
+REGISTER_OP("SparseApplyRMSProp")
+    .Input("var: Ref(T)")
+    .Input("ms: Ref(T)")
+    .Input("mom: Ref(T)")
+    .Input("lr: T")
+    .Input("rho: T")
+    .Input("momentum: T")
+    .Input("epsilon: T")
+    .Input("grad: T")
+    .Input("indices: Tindices")
+    .Output("out: Ref(T)")
+    .Attr("T: numbertype")
+    .Attr("Tindices: {int32, int64}")
+    .Attr("use_locking: bool = false")
+    .Doc(R"doc(
+Update '*var' according to the RMSProp algorithm.
+Note that in dense implement of this algorithm, ms and mom will 
+update even if the grad is zero, but in this sparse implement, ms 
+and mom will not update in iterations the grad is zero.
+
+mean_square = decay * mean_square + (1-decay) * gradient ** 2
+Delta = learning_rate * gradient / sqrt(mean_square + epsilon)
+
+ms <- rho * ms_{t-1} + (1-rho) * grad * grad
+mom <- momentum * mom_{t-1} + lr * grad / sqrt(ms + epsilon)
+var <- var - mom
+
+var: Should be from a Variable().
+ms: Should be from a Variable().
+mom: Should be from a Variable().
+lr: Scaling factor. Must be a scalar.
+epsilon: Ridge term. Must be a scalar.
+rho: Decay rate. Must be a scalar.
+grad: The gradient.
+indices: A vector of indices into the first dimension of var, ms and mom.
+out: Same as "var".
+use_locking: If `True`, updating of the var, m, and v tensors will be protected
+  by a lock; otherwise the behavior is undefined, but may exhibit less
+  contention.
 )doc");
 
 }  // namespace tensorflow

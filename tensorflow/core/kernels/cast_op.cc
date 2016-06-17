@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -35,22 +35,11 @@ typedef Eigen::GpuDevice GPUDevice;
 
 namespace functor {
 
-template <typename Device, typename Tout, typename Tin>
-void CastMaybeInline(const Device& d, typename TTypes<Tout>::Flat o,
-                     typename TTypes<Tin>::ConstFlat i) {
-  if (o.size() * (sizeof(Tin) + sizeof(Tout)) < 131072) {
-    // Small cast on a CPU: do inline
-    o = i.template cast<Tout>();
-  } else {
-    o.device(d) = i.template cast<Tout>();
-  }
-}
-
 template <typename O, typename I>
 struct CastFunctor<CPUDevice, O, I> {
   void operator()(const CPUDevice& d, typename TTypes<O>::Flat o,
                   typename TTypes<I>::ConstFlat i) {
-    CastMaybeInline<CPUDevice, O, I>(d, o, i);
+    o.device(d) = i.template cast<O>();
   }
 };
 
@@ -64,6 +53,7 @@ struct CastFunctor<CPUDevice, O, I> {
   FN(arg0, int16);             \
   FN(arg0, int32);             \
   FN(arg0, int64);             \
+  FN(arg0, Eigen::half);       \
   FN(arg0, float);             \
   FN(arg0, double)
 
@@ -75,6 +65,7 @@ struct CastFunctor<CPUDevice, O, I> {
   FN(arg0, arg1, int16);             \
   FN(arg0, arg1, int32);             \
   FN(arg0, arg1, int64);             \
+  FN(arg0, arg1, Eigen::half);       \
   FN(arg0, arg1, float);             \
   FN(arg0, arg1, double)
 
@@ -140,6 +131,7 @@ class CpuCastOp : public CastOpBase {
     CURRY_TYPES3(CAST_CASE, CPUDevice, int16);
     CURRY_TYPES3(CAST_CASE, CPUDevice, int32);
     CURRY_TYPES3(CAST_CASE, CPUDevice, int64);
+    CURRY_TYPES3(CAST_CASE, CPUDevice, Eigen::half);
     CURRY_TYPES3(CAST_CASE, CPUDevice, float);
     CURRY_TYPES3(CAST_CASE, CPUDevice, double);
 
@@ -147,18 +139,11 @@ class CpuCastOp : public CastOpBase {
       work_ = [](OpKernelContext* ctx, const Tensor& inp, Tensor* out) {
         int64 N = out->NumElements();
         auto worker_threads = ctx->device()->tensorflow_cpu_worker_threads();
-        int num_threads =
-            std::min<int>(std::min(4, worker_threads->num_threads), N / 4096);
-        if (num_threads < 1) {
-          BFloat16ToFloat(inp.flat<bfloat16>().data(),
-                          out->flat<float>().data(), N);
-        } else {
-          auto work = [&inp, &out](int64 start, int64 end) {
-            BFloat16ToFloat(inp.flat<bfloat16>().data() + start,
-                            out->flat<float>().data() + start, end - start);
-          };
-          Shard(num_threads, worker_threads->workers, N, 100, work);
-        }
+        auto work = [&inp, &out](int64 start, int64 end) {
+          BFloat16ToFloat(inp.flat<bfloat16>().data() + start,
+                          out->flat<float>().data() + start, end - start);
+        };
+        Shard(worker_threads->num_threads, worker_threads->workers, N, 2, work);
       };
       return Status::OK();
     }
@@ -166,21 +151,20 @@ class CpuCastOp : public CastOpBase {
       work_ = [](OpKernelContext* ctx, const Tensor& inp, Tensor* out) {
         int64 N = out->NumElements();
         auto worker_threads = ctx->device()->tensorflow_cpu_worker_threads();
-        int num_threads =
-            std::min<int>(std::min(4, worker_threads->num_threads), N / 4096);
-        if (num_threads < 1) {
-          FloatToBFloat16(inp.flat<float>().data(),
-                          out->flat<bfloat16>().data(), N);
-        } else {
-          auto work = [&inp, &out](int64 start, int64 end) {
-            FloatToBFloat16(inp.flat<float>().data() + start,
-                            out->flat<bfloat16>().data() + start, end - start);
-          };
-          Shard(num_threads, worker_threads->workers, N, 100, work);
-        }
+        auto work = [&inp, &out](int64 start, int64 end) {
+          FloatToBFloat16(inp.flat<float>().data() + start,
+                          out->flat<bfloat16>().data() + start, end - start);
+        };
+        Shard(worker_threads->num_threads, worker_threads->workers, N, 2, work);
       };
       return Status::OK();
     }
+
+    // TODO(sesse): If CPU casting to or from Eigen::half ever becomes a
+    // bottleneck, we could probably implement specialized support for
+    // vectorized versions (not the least based on F16C for Haswell
+    // or newer) here.
+
     return Unimplemented();
   }
 };
@@ -204,6 +188,7 @@ class GpuCastOp : public CastOpBase {
     CURRY_TYPES3(CAST_CASE, GPUDevice, int16);
     CURRY_TYPES3(CAST_CASE, GPUDevice, int32);
     CURRY_TYPES3(CAST_CASE, GPUDevice, int64);
+    CURRY_TYPES3(CAST_CASE, GPUDevice, Eigen::half);
     CURRY_TYPES3(CAST_CASE, GPUDevice, float);
     CURRY_TYPES3(CAST_CASE, GPUDevice, double);
     CAST_CASE(GPUDevice, float, bfloat16);
@@ -231,6 +216,7 @@ CURRY_TYPES2(REGISTER_CAST_GPU, uint16);
 CURRY_TYPES2(REGISTER_CAST_GPU, int16);
 CURRY_TYPES2(REGISTER_CAST_GPU, int32);
 CURRY_TYPES2(REGISTER_CAST_GPU, int64);
+CURRY_TYPES2(REGISTER_CAST_GPU, Eigen::half);
 CURRY_TYPES2(REGISTER_CAST_GPU, float);
 CURRY_TYPES2(REGISTER_CAST_GPU, double);
 REGISTER_CAST_GPU(float, bfloat16);

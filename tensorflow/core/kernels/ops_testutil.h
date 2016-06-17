@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -48,10 +48,6 @@ namespace tensorflow {
 
 namespace test {
 
-// Return a NodeDef with the specified name/op/inputs.
-NodeDef Node(const string& name, const string& op,
-             const std::vector<string>& inputs);
-
 inline void SetOutputAttrs(OpKernelContext::Params* params,
                            std::vector<AllocatorAttributes>* attrs) {
   attrs->clear();
@@ -94,10 +90,13 @@ class OpsTestBase : public ::testing::Test {
   // and output types as output.
   //
   // Returns the status of initialization.
-  Status InitOp() {
+  Status InitOp() { return InitOpWithGraphVersion(TF_GRAPH_DEF_VERSION); }
+
+  // Only use this directly if you have a deprecated op that you need to test.
+  Status InitOpWithGraphVersion(int graph_def_version) {
     Status status;
     kernel_ = CreateOpKernel(device_type_, device_.get(), allocator(),
-                             node_def_, TF_GRAPH_DEF_VERSION, &status);
+                             node_def_, graph_def_version, &status);
     if (kernel_ != nullptr) input_types_ = kernel_->input_types();
     return status;
   }
@@ -130,6 +129,28 @@ class OpsTestBase : public ::testing::Test {
   template <typename T>
   void AddInputFromArray(const TensorShape& shape,
                          const gtl::ArraySlice<T>& data) {
+    CHECK_GT(input_types_.size(), inputs_.size())
+        << "Adding more inputs than types; perhaps you need to call MakeOp";
+    bool is_ref = IsRefType(input_types_[inputs_.size()]);
+    Tensor* input = new Tensor(device_->GetAllocator(AllocatorAttributes()),
+                               DataTypeToEnum<T>::v(), shape);
+    test::FillValues<T>(input, data);
+    tensors_.push_back(input);
+    if (is_ref) {
+      CHECK_EQ(RemoveRefType(input_types_[inputs_.size()]),
+               DataTypeToEnum<T>::v());
+      inputs_.push_back({&lock_for_refs_, input});
+    } else {
+      CHECK_EQ(input_types_[inputs_.size()], DataTypeToEnum<T>::v());
+      inputs_.push_back({nullptr, input});
+    }
+  }
+
+  // Convenience function to add an input and populate it with the elements from
+  // an initializer list converting the types as needed.
+  template <typename T, typename SrcType>
+  void AddInputFromList(const TensorShape& shape,
+                        std::initializer_list<SrcType> data) {
     CHECK_GT(input_types_.size(), inputs_.size())
         << "Adding more inputs than types; perhaps you need to call MakeOp";
     bool is_ref = IsRefType(input_types_[inputs_.size()]);

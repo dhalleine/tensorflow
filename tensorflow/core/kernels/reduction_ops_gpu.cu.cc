@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -83,11 +83,14 @@ struct ReduceFunctor<GPUDevice, Eigen::internal::MeanReducer<T> > {
   DEFINE_FOR_TYPE_AND_R(T, Eigen::internal::MaxReducer<T>);  \
   DEFINE_FOR_TYPE_AND_R(T, Eigen::internal::ProdReducer<T>)
 
+DEFINE_FOR_ALL_REDUCERS(Eigen::half);
+DEFINE_FOR_ALL_REDUCERS(int32);
 DEFINE_FOR_ALL_REDUCERS(float);
 DEFINE_FOR_ALL_REDUCERS(double);
 #undef DEFINE_FOR_ALL_REDUCERS
 
 DEFINE_FOR_TYPE_AND_R(complex64, Eigen::internal::SumReducer<complex64>);
+DEFINE_FOR_TYPE_AND_R(complex128, Eigen::internal::SumReducer<complex128>);
 DEFINE_FOR_TYPE_AND_R(bool, Eigen::internal::AndReducer);
 DEFINE_FOR_TYPE_AND_R(bool, Eigen::internal::OrReducer);
 #undef DEFINE_FOR_TYPE_AND_R

@@ -1,5 +1,5 @@
 # Minimum CMake required
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.1)
 
 # Project
 project(tensorflow C CXX)
@@ -43,6 +43,10 @@ include(png)
 include(jpeg)
 include(re2)
 include(eigen)
+include(jsoncpp)
+include(boringssl)
+include(farmhash)
+include(highwayhash)
 
 # Let's get to work!
 include(tf_core_framework.cmake)
@@ -54,6 +58,7 @@ include(tf_core_direct_session.cmake)
 include(tf_core_kernels.cmake)
 include(tf_cc_ops.cmake)
 include(tf_tutorials.cmake)
+include(tf_tools.cmake)
 
 if (tensorflow_BUILD_TESTS)
   include(tests.cmake)

@@ -10,10 +10,13 @@ help and advice.
 ### Environment info
 Operating System:
 
+Installed version of CUDA and cuDNN: 
+(please attach the output of `ls -l /path/to/cuda/lib/libcud*`):
+
 If installed from binary pip package, provide:
 
 1. Which pip package you installed.
-2. The output from python -c "import tensorflow; print(tensorflow.__version__)".
+2. The output from `python -c "import tensorflow; print(tensorflow.__version__)"`.
 
 If installed from sources, provide the commit hash:
 

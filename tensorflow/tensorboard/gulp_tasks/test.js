@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,8 +17,7 @@ var gulp = require('gulp');
 var tester = require('web-component-tester').test;
 
 module.exports = function(done) {
-  tester({suites: ['components/tf-test/'],
-          plugins: {local: {}, sauce: false}}, function(error) {
+  tester({}, function(error) {
     if (error) {
       // Pretty error for gulp.
       error = new Error(error.message || error);

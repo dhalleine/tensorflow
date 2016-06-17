@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -99,7 +99,7 @@ class BinaryElementWiseOp : public BinaryOp<T> {
 #undef NDIM_CASE
 
       default:
-        context->SetStatus(errors::OutOfRange(
+        context->SetStatus(errors::InvalidArgument(
             "We only handle up to Tensor::dims() up to 8, not ", a.dims()));
         break;
     }

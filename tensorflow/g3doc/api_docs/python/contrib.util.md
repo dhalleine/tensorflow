@@ -20,6 +20,11 @@ TODO(mrry): Consider whether this function should use a registration
 mechanism like gradients and ShapeFunctions, so that it is easily
 extensible.
 
+NOTE: If `constant_value(tensor)` returns a non-`None` result, it will no
+longer be possible to feed a different value for `tensor`. This allows the
+result of this function to influence the graph that is constructed, and
+permits static shape optimizations.
+
 ##### Args:
 
 
@@ -108,9 +113,27 @@ Create a numpy ndarray with the same shape and data as the tensor.
 
 - - -
 
+### `tf.contrib.util.ops_used_by_graph_def(graph_def)` {#ops_used_by_graph_def}
+
+Collect the list of ops used by a graph.
+
+Does not validate that the ops are all registered.
+
+##### Args:
+
+
+*  <b>`graph_def`</b>: A `GraphDef` proto, as from `graph.as_graph_def()`.
+
+##### Returns:
+
+  A list of strings, each naming an op used by the graph.
+
+
+- - -
+
 ### `tf.contrib.util.stripped_op_list_for_graph(graph_def)` {#stripped_op_list_for_graph}
 
-Collect the ops used by a graph.
+Collect the stripped OpDefs for ops used by a graph.
 
 This function computes the `stripped_op_list` field of `MetaGraphDef` and
 similar protos.  The result can be communicated from the producer to the

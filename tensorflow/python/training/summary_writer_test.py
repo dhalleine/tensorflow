@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -49,7 +49,26 @@ class SummaryWriterTestCase(tf.test.TestCase):
   def _assertRecent(self, t):
     self.assertTrue(abs(t - time.time()) < 5)
 
-  def testAddingSummaryAndGraph(self):
+  def _assertEventsWithGraph(self, test_dir, g, has_shapes):
+    rr = self._EventsReader(test_dir)
+
+    # The first event should list the file_version.
+    ev = next(rr)
+    self._assertRecent(ev.wall_time)
+    self.assertEquals("brain.Event:2", ev.file_version)
+
+    # The next event should have the graph.
+    ev = next(rr)
+    self._assertRecent(ev.wall_time)
+    self.assertEquals(0, ev.step)
+    ev_graph = tf.GraphDef()
+    ev_graph.ParseFromString(ev.graph_def)
+    self.assertProtoEquals(g.as_graph_def(add_shapes=has_shapes), ev_graph)
+
+    # We should be done.
+    self.assertRaises(StopIteration, lambda: next(rr))
+
+  def testAddingSummaryGraphAndRunMetadata(self):
     test_dir = self._CleanTestDir("basics")
     sw = tf.train.SummaryWriter(test_dir)
 
@@ -62,8 +81,12 @@ class SummaryWriterTestCase(tf.test.TestCase):
                    20)
     with tf.Graph().as_default() as g:
       tf.constant([0], name="zero")
-    gd = g.as_graph_def()
-    sw.add_graph(gd, global_step=30)
+    sw.add_graph(g, global_step=30)
+
+    run_metadata = tf.RunMetadata()
+    device_stats = run_metadata.step_stats.dev_stats.add()
+    device_stats.device = "test"
+    sw.add_run_metadata(run_metadata, "test run", global_step=40)
     sw.close()
     rr = self._EventsReader(test_dir)
 
@@ -100,33 +123,109 @@ class SummaryWriterTestCase(tf.test.TestCase):
     self.assertEquals(30, ev.step)
     ev_graph = tf.GraphDef()
     ev_graph.ParseFromString(ev.graph_def)
-    self.assertProtoEquals(gd, ev_graph)
+    self.assertProtoEquals(g.as_graph_def(add_shapes=True), ev_graph)
+
+    # The next event should have metadata for the run.
+    ev = next(rr)
+    self._assertRecent(ev.wall_time)
+    self.assertEquals(40, ev.step)
+    self.assertEquals("test run", ev.tagged_run_metadata.tag)
+    parsed_run_metadata = tf.RunMetadata()
+    parsed_run_metadata.ParseFromString(ev.tagged_run_metadata.run_metadata)
+    self.assertProtoEquals(run_metadata, parsed_run_metadata)
 
     # We should be done.
     self.assertRaises(StopIteration, lambda: next(rr))
 
-  def testInitializingWithGraphDef(self):
-    test_dir = self._CleanTestDir("basics_with_graph")
+  def testGraphAsNamed(self):
+    test_dir = self._CleanTestDir("basics_named_graph")
+    with tf.Graph().as_default() as g:
+      tf.constant([12], name="douze")
+    sw = tf.train.SummaryWriter(test_dir, graph=g)
+    sw.close()
+    self._assertEventsWithGraph(test_dir, g, True)
+
+  def testGraphAsPositional(self):
+    test_dir = self._CleanTestDir("basics_positional_graph")
+    with tf.Graph().as_default() as g:
+      tf.constant([12], name="douze")
+    sw = tf.train.SummaryWriter(test_dir, g)
+    sw.close()
+    self._assertEventsWithGraph(test_dir, g, True)
+
+  def testGraphDefAsNamed(self):
+    test_dir = self._CleanTestDir("basics_named_graph_def")
     with tf.Graph().as_default() as g:
       tf.constant([12], name="douze")
     gd = g.as_graph_def()
     sw = tf.train.SummaryWriter(test_dir, graph_def=gd)
     sw.close()
-    rr = self._EventsReader(test_dir)
+    self._assertEventsWithGraph(test_dir, g, False)
 
+  def testGraphDefAsPositional(self):
+    test_dir = self._CleanTestDir("basics_positional_graph_def")
+    with tf.Graph().as_default() as g:
+      tf.constant([12], name="douze")
+    gd = g.as_graph_def()
+    sw = tf.train.SummaryWriter(test_dir, gd)
+    sw.close()
+    self._assertEventsWithGraph(test_dir, g, False)
+
+  def testGraphAndGraphDef(self):
+    with self.assertRaises(ValueError):
+      test_dir = self._CleanTestDir("basics_graph_and_graph_def")
+      with tf.Graph().as_default() as g:
+        tf.constant([12], name="douze")
+      gd = g.as_graph_def()
+      sw = tf.train.SummaryWriter(test_dir, graph=g, graph_def=gd)
+      sw.close()
+
+  def testNeitherGraphNorGraphDef(self):
+    with self.assertRaises(TypeError):
+      test_dir = self._CleanTestDir("basics_string_instead_of_graph")
+      sw = tf.train.SummaryWriter(test_dir, "string instead of graph object")
+      sw.close()
+
+  def testCloseAndReopen(self):
+    test_dir = self._CleanTestDir("close_and_reopen")
+    sw = tf.train.SummaryWriter(test_dir)
+    sw.add_session_log(tf.SessionLog(status=SessionLog.START), 1)
+    sw.close()
+    # Sleep at least one second to make sure we get a new event file name.
+    time.sleep(1.2)
+    sw.reopen()
+    sw.add_session_log(tf.SessionLog(status=SessionLog.START), 2)
+    sw.close()
+
+    # We should now have 2 events files.
+    event_paths = sorted(glob.glob(os.path.join(test_dir, "event*")))
+    self.assertEquals(2, len(event_paths))
+
+    # Check the first file contents.
+    rr = tf.train.summary_iterator(event_paths[0])
     # The first event should list the file_version.
     ev = next(rr)
     self._assertRecent(ev.wall_time)
     self.assertEquals("brain.Event:2", ev.file_version)
-
-    # The next event should have the graph.
+    # The next event should be the START message.
     ev = next(rr)
     self._assertRecent(ev.wall_time)
-    self.assertEquals(0, ev.step)
-    ev_graph = tf.GraphDef()
-    ev_graph.ParseFromString(ev.graph_def)
-    self.assertProtoEquals(gd, ev_graph)
+    self.assertEquals(1, ev.step)
+    self.assertEquals(SessionLog.START, ev.session_log.status)
+    # We should be done.
+    self.assertRaises(StopIteration, lambda: next(rr))
 
+    # Check the second file contents.
+    rr = tf.train.summary_iterator(event_paths[1])
+    # The first event should list the file_version.
+    ev = next(rr)
+    self._assertRecent(ev.wall_time)
+    self.assertEquals("brain.Event:2", ev.file_version)
+    # The next event should be the START message.
+    ev = next(rr)
+    self._assertRecent(ev.wall_time)
+    self.assertEquals(2, ev.step)
+    self.assertEquals(SessionLog.START, ev.session_log.status)
     # We should be done.
     self.assertRaises(StopIteration, lambda: next(rr))
 

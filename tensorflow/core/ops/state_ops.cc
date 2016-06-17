@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -38,6 +38,20 @@ container: If non-empty, this variable is placed in the given container.
         Otherwise, a default container is used.
 shared_name: If non-empty, this variable is named in the given bucket
              with this shared_name. Otherwise, the node name is used instead.
+)doc");
+
+REGISTER_OP("IsVariableInitialized")
+    .Output("is_initialized: bool")
+    .Input("ref: Ref(dtype)")
+    .Attr("dtype: type")
+    .SetAllowsUninitializedInput()
+    .Doc(R"doc(
+Checks whether a tensor has been initialized.
+
+Outputs boolean scalar indicating whether the tensor has been initialized.
+
+ref: Should be from a `Variable` node. May be uninitialized.
+dtype: The type of elements in the variable tensor.
 )doc");
 
 REGISTER_OP("TemporaryVariable")

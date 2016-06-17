@@ -1,4 +1,4 @@
-/* Copyright 2016 Google Inc. All Rights Reserved.
+/* Copyright 2016 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -73,7 +73,10 @@ class GrpcChannelCache {
   virtual string TranslateTask(const string& task) = 0;
 };
 
-GrpcChannelCache* NewGrpcChannelCache(const GrpcChannelSpec& p);
+typedef std::function<SharedGrpcChannelPtr(string)> ChannelCreationFunction;
+
+GrpcChannelCache* NewGrpcChannelCache(const GrpcChannelSpec& p,
+                                      ChannelCreationFunction channel_func);
 
 // Below here are internal-only functions.
 
@@ -87,7 +90,7 @@ SharedGrpcChannelPtr NewHostPortGrpcChannel(const string& target);
 // The caller takes ownership of the returned object.
 GrpcChannelCache* NewHostPortsGrpcChannelCache(
     const string& job_id, const std::vector<string>& host_ports,
-    int tasks_per_replica);
+    int tasks_per_replica, ChannelCreationFunction channel_func);
 
 // Returns a ChannelCache that is the union of a number of other ChannelCaches.
 GrpcChannelCache* NewMultiGrpcChannelCache(

@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,10 +19,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import os.path
 import time
 
-import numpy
 from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
 
@@ -152,21 +150,24 @@ def run_training():
     # Build the summary operation based on the TF collection of Summaries.
     summary_op = tf.merge_all_summaries()
 
+    # Add the variable initializer Op.
+    init = tf.initialize_all_variables()
+
     # Create a saver for writing training checkpoints.
     saver = tf.train.Saver()
 
     # Create a session for running Ops on the Graph.
     sess = tf.Session()
 
+    # Instantiate a SummaryWriter to output summaries and the Graph.
+    summary_writer = tf.train.SummaryWriter(FLAGS.train_dir, sess.graph)
+
+    # And then after everything is built:
+
     # Run the Op to initialize the variables.
-    init = tf.initialize_all_variables()
     sess.run(init)
 
-    # Instantiate a SummaryWriter to output summaries and the Graph.
-    summary_writer = tf.train.SummaryWriter(FLAGS.train_dir,
-                                            graph_def=sess.graph_def)
-
-    # And then after everything is built, start the training loop.
+    # Start the training loop.
     for step in xrange(FLAGS.max_steps):
       start_time = time.time()
 
@@ -193,6 +194,7 @@ def run_training():
         # Update the events file.
         summary_str = sess.run(summary_op, feed_dict=feed_dict)
         summary_writer.add_summary(summary_str, step)
+        summary_writer.flush()
 
       # Save a checkpoint and evaluate the model periodically.
       if (step + 1) % 1000 == 0 or (step + 1) == FLAGS.max_steps:

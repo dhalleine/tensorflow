@@ -1,13 +1,13 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+Licensed under the Apache License, Version 2.0 (the 'License');
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
     http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
+distributed under the License is distributed on an 'AS IS' BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
@@ -70,10 +70,7 @@ export const PARAMS = {
      * element. The padding amounts are applied using an SVG transform of X and
      * Y coordinates.
      */
-    padding: {
-      paddingTop: 40,
-      paddingLeft: 20
-    }
+    padding: {paddingTop: 40, paddingLeft: 20}
   },
   subscene: {
     meta: {
@@ -87,7 +84,7 @@ export const PARAMS = {
        */
       labelHeight: 20,
       /** X-space between each extracted node and the core graph. */
-      extractXOffset: 50,
+      extractXOffset: 15,
       /** Y-space between each extracted node. */
       extractYOffset: 20
     },
@@ -104,6 +101,7 @@ export const PARAMS = {
     meta: {
       radius: 5,
       width: 60,
+      maxLabelWidth: 52,
       /** A scale for the node's height based on number of nodes inside */
       height: d3.scale.linear().domain([1, 200]).range([15, 60]).clamp(true),
       /** The radius of the circle denoting the expand button. */
@@ -113,8 +111,9 @@ export const PARAMS = {
     op: {
       width: 15,
       height: 6,
-      radius: 3, // for making annotation touching ellipse
-      labelOffset: -8
+      radius: 3,  // for making annotation touching ellipse
+      labelOffset: -8,
+      maxLabelWidth: 30
     },
     /** Size of series nodes. */
     series: {
@@ -138,7 +137,7 @@ export const PARAMS = {
         // ellipses.
         width: 24,
         height: 8,
-        radius: 10, // Forces annotations to center line.
+        radius: 10,  // Forces annotations to center line.
         labelOffset: -10,
       },
     },
@@ -155,16 +154,9 @@ export const PARAMS = {
   },
   shortcutSize: {
     /** Size of shortcuts for op nodes */
-    op: {
-      width: 10,
-      height: 4
-    },
+    op: {width: 10, height: 4},
     /** Size of shortcuts for meta nodes */
-    meta: {
-      width: 12,
-      height: 4,
-      radius: 1
-    },
+    meta: {width: 12, height: 4, radius: 1},
     /** Size of shortcuts for series nodes */
     series: {
       width: 14,
@@ -182,15 +174,10 @@ export const PARAMS = {
     yOffset: 3,
     /** X-space between each annotation-node and its label. */
     labelOffset: 2,
-    /** Estimate max width for annotation label */
-    labelWidth: 35
+    /** Defines the max width for annotation label */
+    maxLabelWidth: 120
   },
-  constant: {
-    size: {
-      width: 4,
-      height: 4
-    }
-  },
+  constant: {size: {width: 4, height: 4}},
   series: {
     /** Maximum number of repeated item for unexpanded series node. */
     maxStackCount: 3,
@@ -205,7 +192,7 @@ export const PARAMS = {
      */
     towerStackOffsetRatio: 0.5
   },
-  minimap : {
+  minimap: {
     /** The maximum width/height the minimap can have. */
     size: 150
   }
@@ -296,7 +283,7 @@ function layoutChildren(renderNodeInfo: render.RenderGroupNodeInfo): void {
         }
         break;
       default:
-        throw Error("Unrecognized node type: " + childNodeInfo.node.type);
+        throw Error('Unrecognized node type: ' + childNodeInfo.node.type);
     }
     // Compute total width of un-expanded nodes. Width of expanded nodes
     // has already been computed.
@@ -486,9 +473,24 @@ function layoutMetanode(renderNodeInfo: render.RenderGroupNodeInfo): void {
       return height + yOffset + child.height;
     }, 0);
 
+  // Compute the total padding between the core graph, in-extract and
+  // out-extract boxes.
+  let numParts = 0;
+  if (renderNodeInfo.isolatedInExtract.length > 0) {
+    numParts++;
+  }
+  if (renderNodeInfo.isolatedOutExtract.length > 0) {
+    numParts++;
+  }
+  if (renderNodeInfo.coreGraph.nodeCount() > 0) {
+    numParts++;
+  }
+  let offset = PARAMS.subscene.meta.extractXOffset;
+  let padding = numParts <= 1 ? 0 : (numParts  <= 2 ? offset : 2 * offset);
+
   // Add the in-extract and out-extract width to the core box width.
   renderNodeInfo.coreBox.width += renderNodeInfo.inExtractBox.width +
-      renderNodeInfo.outExtractBox.width;
+      renderNodeInfo.outExtractBox.width + padding;
   renderNodeInfo.coreBox.height =
     params.labelHeight +
     Math.max(
@@ -573,7 +575,7 @@ function layoutAnnotation(renderNodeInfo: render.RenderNodeInfo): void {
     a.labelOffset = params.labelOffset;
   });
 
-  // Calculate annotation node position position (a.dx, a.dy)
+  // Calculate annotation node position (a.dx, a.dy)
   // and total height for out-annotations
   // After this chunk of code:
   // outboxHeight = sum of annotation heights +
@@ -673,7 +675,7 @@ function sizeAnnotation(a: render.Annotation): void {
       } else if (a.node.type === NodeType.SERIES) {
         _.extend(a, PARAMS.shortcutSize.series);
       } else {
-        throw Error("Invalid node type: " + a.node.type);
+        throw Error('Invalid node type: ' + a.node.type);
       }
       break;
     case render.AnnotationType.SUMMARY:
@@ -723,8 +725,8 @@ function isStraightLine(points: render.Point[]) {
  * Returns the intersection of a line between the provided point
  * and the provided rectangle.
  */
-function intersectPointAndNode(point: render.Point, node: render.RenderNodeInfo):
-    render.Point {
+function intersectPointAndNode(
+    point: render.Point, node: render.RenderNodeInfo): render.Point {
   // cx and cy are the center of the rectangle.
   let cx = node.expanded ?
      node.x : computeCXPositionOfNodeShape(node);

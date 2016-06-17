@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -203,6 +203,29 @@ TEST_F(GraphTest, Type) {
   CheckType(graph_.sink_node(), graph_.sink_node()->IsSink());
   CheckType(op, op->IsOp());
   VerifyGraphStats();
+}
+
+TEST_F(GraphTest, AddAttr) {
+  Node* n1 = AddNodeWithName("A");
+
+  n1->AddAttr("_a", "new_attr");
+
+  string attr;
+  EXPECT_EQ(Status::OK(), GetNodeAttr(n1->def(), "_a", &attr));
+  EXPECT_EQ("new_attr", attr);
+
+  Node* n2 = graph_.CopyNode(n1);
+
+  n1->AddAttr("_b", "new_attr_2");
+
+  EXPECT_EQ(Status::OK(), GetNodeAttr(n1->def(), "_a", &attr));
+  EXPECT_EQ("new_attr", attr);
+  EXPECT_EQ(Status::OK(), GetNodeAttr(n1->def(), "_b", &attr));
+  EXPECT_EQ("new_attr_2", attr);
+
+  EXPECT_EQ(Status::OK(), GetNodeAttr(n2->def(), "_a", &attr));
+  EXPECT_EQ("new_attr", attr);
+  EXPECT_NE(Status::OK(), GetNodeAttr(n2->def(), "_b", &attr));
 }
 
 // Convert edge iteration results into a sorted string.

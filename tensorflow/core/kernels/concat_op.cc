@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@ limitations under the License.
 
 // See docs in ../ops/array_ops.cc.
 
+#include <limits>
 #include <vector>
 
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
@@ -23,6 +24,7 @@ limitations under the License.
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_types.h"
 #include "tensorflow/core/framework/types.h"
+#include "tensorflow/core/kernels/bounds_check.h"
 #include "tensorflow/core/kernels/concat_lib.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/platform/types.h"
@@ -49,14 +51,15 @@ class ConcatOp : public OpKernel {
         errors::InvalidArgument(
             "Concat dim tensor should be a scalar integer, but got shape ",
             concat_dim_tensor->shape().DebugString()));
-    const int32 concat_dim = concat_dim_tensor->scalar<int32>()();
+    const int32 concat_dim =
+        internal::SubtleMustCopy(concat_dim_tensor->scalar<int32>()());
     OpInputList values;
     OP_REQUIRES_OK(c, c->input_list("values", &values));
     const int N = values.size();
     const int input_dims = values[0].dims();
     const TensorShape& input_shape = values[0].shape();
     OP_REQUIRES(
-        c, (0 <= concat_dim && concat_dim < input_dims) ||
+        c, FastBoundsCheck(concat_dim, input_dims) ||
                (allow_legacy_scalars() && concat_dim == 0),
         errors::InvalidArgument(
             "ConcatOp : Expected concatenating dimensions in the range [", 0,
@@ -73,7 +76,7 @@ class ConcatOp : public OpKernel {
     for (int d = 0; d < concat_dim; ++d) {
       inputs_flat_dim0 *= input_shape.dim_size(d);
     }
-    int output_concat_dim = 0;
+    int64 output_concat_dim = 0;
     const bool input_is_scalar = IsLegacyScalar(input_shape);
     for (int i = 0; i < N; ++i) {
       const auto in = values[i];
@@ -117,7 +120,14 @@ class ConcatOp : public OpKernel {
       int64 output_dim1 = output->NumElements() / inputs_flat_dim0;
       auto output_flat = output->shaped<T, 2>({inputs_flat_dim0, output_dim1});
       if (std::is_same<Device, GPUDevice>::value) {
-        ConcatGPU<T>(c->eigen_gpu_device(), inputs_flat, &output_flat);
+        // Switching indexing to int64 might cause performance issues.
+        // Hence, we keep int32 indexing in the GPU kernel unless we need to
+        // switch to int64.
+        if (output->NumElements() < std::numeric_limits<int32>::max()) {
+          ConcatGPU32<T>(c->eigen_gpu_device(), inputs_flat, &output_flat);
+        } else {
+          ConcatGPU64<T>(c->eigen_gpu_device(), inputs_flat, &output_flat);
+        }
       } else {
         ConcatCPU<T>(c->device(), inputs_flat, &output_flat);
       }
@@ -135,6 +145,8 @@ class ConcatOp : public OpKernel {
 TF_CALL_ALL_TYPES(REGISTER_CONCAT);
 REGISTER_CONCAT(quint8);
 REGISTER_CONCAT(qint8);
+REGISTER_CONCAT(quint16);
+REGISTER_CONCAT(qint16);
 REGISTER_CONCAT(qint32);
 REGISTER_CONCAT(bfloat16);
 
@@ -205,9 +217,9 @@ class ConcatOffsetOp : public OpKernel {
     const int32 N = ctx->num_inputs() - 1;
     const Tensor& inp0 = ctx->input(1);
     auto inp0_vec = inp0.vec<int32>();
-    const int32 cdim = concat_dim.scalar<int32>()();
-    const int32 dims = inp0.NumElements();
-    OP_REQUIRES(ctx, (0 <= cdim) && (cdim < dims),
+    const int64 cdim = internal::SubtleMustCopy(concat_dim.scalar<int32>()());
+    const int64 dims = inp0.NumElements();
+    OP_REQUIRES(ctx, FastBoundsCheck(cdim, dims),
                 errors::InvalidArgument("Concat dim is out of range: ", cdim,
                                         " vs. ", dims));
     int32 offset = 0;
@@ -221,7 +233,7 @@ class ConcatOffsetOp : public OpKernel {
       Tensor* out = nullptr;
       OP_REQUIRES_OK(ctx, ctx->allocate_output(i, {dims}, &out));
       auto out_vec = out->vec<int32>();
-      for (int j = 0; j < dims; ++j) {
+      for (int64 j = 0; j < dims; ++j) {
         if (j == cdim) {
           out_vec(j) = offset;
           offset += inp_vec(j);

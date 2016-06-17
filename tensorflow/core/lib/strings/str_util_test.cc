@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -41,15 +41,6 @@ TEST(CUnescape, Basic) {
   EXPECT_EQ("hello\r", ExpectCUnescapeSuccess("hello\\r"));
   EXPECT_EQ("\t\r\"'", ExpectCUnescapeSuccess("\\t\\r\\\"\\'"));
   EXPECT_EQ("\320hi\200", ExpectCUnescapeSuccess("\\320hi\\200"));
-}
-
-TEST(NumericParse32, Basic) {
-  int32 val = -1234;
-  EXPECT_TRUE(str_util::NumericParse32("0", &val) && val == 0);
-  EXPECT_TRUE(str_util::NumericParse32("123", &val) && val == 123);
-  EXPECT_TRUE(str_util::NumericParse32("-375", &val) && val == -375);
-  EXPECT_FALSE(str_util::NumericParse32("123hello", &val));
-  EXPECT_FALSE(str_util::NumericParse32("hello123", &val));
 }
 
 TEST(StripTrailingWhitespace, Basic) {

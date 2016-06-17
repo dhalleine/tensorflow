@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -94,6 +94,11 @@ void WriteCCOp(const OpDef& op_def, WritableFile* h, WritableFile* cc) {
     comment = "TODO: add doc.\n";
   } else {
     comment = strings::StrCat(op_def.summary(), "\n");
+    if (op_def.has_deprecation()) {
+      strings::StrAppend(&comment, "\nDEPRECATED at GraphDef version ",
+                         op_def.deprecation().version(), ":\n",
+                         op_def.deprecation().explanation(), ".\n");
+    }
     if (!op_def.description().empty()) {
       strings::StrAppend(&comment, "\n", op_def.description(), "\n");
     }

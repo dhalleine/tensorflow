@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,13 +23,14 @@ import warnings
 import numpy as np
 import tensorflow as tf
 
+from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import function
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import test_util
+from tensorflow.python.framework.constant_op import constant
 from tensorflow.python.ops import array_grad  # pylint: disable=unused-import
 from tensorflow.python.ops import array_ops
-from tensorflow.python.ops import constant_op
 from tensorflow.python.ops import data_flow_grad  # pylint: disable=unused-import
 from tensorflow.python.ops import data_flow_ops  # pylint: disable=unused-import
 from tensorflow.python.ops import gradients
@@ -37,7 +38,6 @@ from tensorflow.python.ops import math_grad  # pylint: disable=unused-import
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import nn_grad  # pylint: disable=unused-import
 from tensorflow.python.ops import state_grad  # pylint: disable=unused-import
-from tensorflow.python.ops.constant_op import constant
 from tensorflow.python.ops import functional_ops  # pylint: disable=unused-import
 
 from tensorflow.python.ops.nn_ops import bias_add
@@ -259,6 +259,18 @@ class GradientsTest(test_util.TensorFlowTestCase):
       w = z * 3.0
       grads = gradients.gradients(z, [c])
       self.assertTrue(isinstance(grads[0], ops.Tensor))
+
+  def testSingletonIndexedSlices(self):
+    with ops.Graph().as_default():
+      x = tf.placeholder(tf.float32)
+      y = tf.identity(x)
+      dy = tf.IndexedSlices(tf.placeholder(tf.float32),
+                            tf.placeholder(tf.int32))
+      dx, = gradients.gradients(y, x, grad_ys=dy)
+      # The gradient of tf.identity should pass the value through unchanged.
+      # A previous version of the code did this only for tf.Tensor, not
+      # tf.IndexedSlices.
+      self.assertEqual(dx, dy)
 
 
 class FunctionGradientsTest(test_util.TensorFlowTestCase):

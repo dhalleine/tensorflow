@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright 2016 Google Inc. All Rights Reserved.
+# Copyright 2016 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -115,7 +115,8 @@ docker run -v ${BASE_DIR}:/tensorflow-src -w /tensorflow-src \
 ${GPU_EXTRA_PARAMS} \
 "${DOCKER_IMG_TAG}" \
 /bin/bash -c "tensorflow/tools/ci_build/builds/test_installation.sh && "\
-"tensorflow/tools/ci_build/builds/test_tutorials.sh"
+"tensorflow/tools/ci_build/builds/test_tutorials.sh && "\
+"tensorflow/tools/ci_bukld/builds/integration_tests.sh"
 
 RESULT=$?
 

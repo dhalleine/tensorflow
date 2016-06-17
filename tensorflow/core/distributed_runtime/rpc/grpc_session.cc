@@ -1,4 +1,4 @@
-/* Copyright 2016 Google Inc. All Rights Reserved.
+/* Copyright 2016 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -28,15 +28,27 @@ limitations under the License.
 
 namespace tensorflow {
 
-const size_t kSchemePrefix = sizeof("grpc://") - 1;
-
 GrpcSession::GrpcSession(const SessionOptions& options)
     : options_(options),
-      master_(NewGrpcMaster(
-          NewHostPortGrpcChannel(options.target.substr(kSchemePrefix)))),
       current_graph_version_(-1) {}
 
 GrpcSession::~GrpcSession() {}
+
+namespace {
+const char* kSchemePrefix = "grpc://";
+const size_t kSchemePrefixLength = strlen(kSchemePrefix);
+}  // namespace
+
+/* static */
+Status GrpcSession::Create(const SessionOptions& options,
+                           std::unique_ptr<GrpcSession>* out_session) {
+  std::unique_ptr<GrpcSession> ret(new GrpcSession(options));
+  SharedGrpcChannelPtr master_channel =
+      NewHostPortGrpcChannel(options.target.substr(kSchemePrefixLength));
+  ret->SetRemoteMaster(NewGrpcMaster(master_channel));
+  *out_session = std::move(ret);
+  return Status::OK();
+}
 
 namespace {
 // Re-encodes constant represented in tensor proto into
@@ -70,8 +82,11 @@ void ReEncodeConsts(GraphDef* gdef) {
 
 Status GrpcSession::CreateImpl(CallOptions* call_options,
                                const GraphDef& graph) {
-  if (!handle_.empty()) {
-    return errors::InvalidArgument("A session is alive.");
+  {
+    mutex_lock l(mu_);
+    if (!handle_.empty()) {
+      return errors::InvalidArgument("A session is alive.");
+    }
   }
   CreateSessionRequest req;
   *req.mutable_config() = options_.config;
@@ -102,7 +117,12 @@ Status GrpcSession::Create(const RunOptions& run_options,
 
 Status GrpcSession::ExtendImpl(CallOptions* call_options,
                                const GraphDef& graph) {
-  if (handle_.empty()) {
+  bool handle_is_empty;
+  {
+    mutex_lock l(mu_);
+    handle_is_empty = handle_.empty();
+  }
+  if (handle_is_empty) {
     // Session was unitialized, so simply initialize the session with 'graph'.
     return Create(graph);
   }
@@ -136,7 +156,8 @@ Status GrpcSession::Run(const RunOptions& run_options,
                         const std::vector<std::pair<string, Tensor>>& inputs,
                         const std::vector<string>& output_tensor_names,
                         const std::vector<string>& target_node_names,
-                        std::vector<Tensor>* outputs, RunOutputs* run_outputs) {
+                        std::vector<Tensor>* outputs,
+                        RunMetadata* run_metadata) {
   // Convert to proto
   RunStepRequest req;
   RunStepResponse resp;
@@ -200,11 +221,14 @@ Status GrpcSession::Run(const std::vector<std::pair<string, Tensor>>& inputs,
 
 Status GrpcSession::RunProto(CallOptions* call_options, RunStepRequest* req,
                              RunStepResponse* resp) {
-  if (handle_.empty()) {
-    return errors::InvalidArgument("A session is not created yet....");
-  }
+  {
+    mutex_lock l(mu_);
+    if (handle_.empty()) {
+      return errors::InvalidArgument("A session is not created yet....");
+    }
 
-  req->set_session_handle(handle_);
+    req->set_session_handle(handle_);
+  }
   return master_->RunStep(call_options, req, resp);
 }
 
@@ -223,12 +247,15 @@ Status GrpcSession::PRun(const string& handle,
 }
 
 Status GrpcSession::Close() {
-  if (handle_.empty()) {
-    return errors::InvalidArgument("A session is not created yet....");
-  }
   CloseSessionRequest req;
-  req.set_session_handle(handle_);
-  handle_.clear();
+  {
+    mutex_lock l(mu_);
+    if (handle_.empty()) {
+      return errors::InvalidArgument("A session is not created yet....");
+    }
+    req.set_session_handle(handle_);
+    handle_.clear();
+  }
   CloseSessionResponse resp;
   CallOptions call_options;
   call_options.SetTimeout(options_.config.operation_timeout_in_ms());
@@ -258,14 +285,25 @@ std::vector<DeviceAttributes> GrpcSession::ListDevices() {
   return devices;
 }
 
+void GrpcSession::SetRemoteMaster(MasterInterface* master) {
+  master_.reset(master);
+}
+
 class GrpcSessionFactory : public SessionFactory {
  public:
   bool AcceptsOptions(const SessionOptions& options) override {
-    return StringPiece(options.target).starts_with("grpc://");
+    return StringPiece(options.target).starts_with(kSchemePrefix);
   }
 
   Session* NewSession(const SessionOptions& options) override {
-    return new GrpcSession(options);
+    std::unique_ptr<GrpcSession> ret;
+    Status s = GrpcSession::Create(options, &ret);
+    if (s.ok()) {
+      return ret.release();
+    } else {
+      LOG(ERROR) << "Error during session construction: " << s.ToString();
+      return nullptr;
+    }
   }
 };
 

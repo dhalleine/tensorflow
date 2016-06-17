@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,10 +19,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import tensor_util
 from tensorflow.python.ops import array_ops
-from tensorflow.python.ops import constant_op
 from tensorflow.python.ops import gen_array_ops
 from tensorflow.python.ops import math_ops
 
@@ -156,9 +156,33 @@ def _SplitGrad(op, *grads):
 
 ops.NoGradient("Const")
 
-# TODO(liqzhang): The gradient for Diag operator would be
-# the diagonal of the backprop. Implement if there is a need.
-ops.NoGradient("Diag")
+
+@ops.RegisterGradient("Diag")
+def _DiagGrad(_, grad):
+  return array_ops.diag_part(grad)
+
+@ops.RegisterGradient("DiagPart")
+def _DiagPartGrad(_, grad):
+  return array_ops.diag(grad)
+
+
+@ops.RegisterGradient("BatchMatrixDiag")
+def _BatchMatrixDiagGrad(_, grad):
+  return array_ops.batch_matrix_diag_part(grad)
+
+
+@ops.RegisterGradient("BatchMatrixDiagPart")
+def _BatchMatrixDiagPartGrad(_, grad):
+  return array_ops.batch_matrix_diag(grad)
+
+
+@ops.RegisterGradient("BatchMatrixBandPart")
+def _BatchMatrixBandPartGrad(op, grad):
+  num_lower = op.inputs[1]
+  num_upper = op.inputs[2]
+  return (array_ops.batch_matrix_band_part(grad, num_lower, num_upper), None,
+          None)
+
 
 # Edit Distance has no gradient (but can be used to eval seq2seq or CTC).
 ops.NoGradient("EditDistance")
@@ -186,6 +210,11 @@ def _GatherGrad(op, grad):
   values = array_ops.reshape(grad, values_shape)
   indices = array_ops.reshape(op.inputs[1], [-1])
   return [ops.IndexedSlices(values, indices, dense_shape), None]
+
+
+@ops.RegisterGradient("GatherNd")
+def _GatherNdGrad(unused_op, unused_grad):
+  raise NotImplementedError("Gradient for gather_nd is not implemented.")
 
 
 @ops.RegisterGradient("Identity")
@@ -304,6 +333,22 @@ def _ReverseGrad(op, grad):
   return array_ops.reverse(grad, reverse_dims), None
 
 
+@ops.RegisterGradient("SpaceToBatch")
+def _SpaceToBatchGrad(op, grad):
+  # Its gradient is the opposite op: BatchToSpace.
+  block_size = op.get_attr("block_size")
+  return [array_ops.batch_to_space(grad, op.inputs[1], block_size=block_size),
+          None]
+
+
+@ops.RegisterGradient("BatchToSpace")
+def _BatchToSpaceGrad(op, grad):
+  # Its gradient is the opposite op: SpaceToBatch.
+  block_size = op.get_attr("block_size")
+  return [array_ops.space_to_batch(grad, op.inputs[1], block_size=block_size),
+          None]
+
+
 @ops.RegisterGradient("SpaceToDepth")
 def _SpaceToDepthGrad(op, grad):
   # Its gradient is the opposite op: DepthToSpace.
@@ -335,3 +380,8 @@ def _MirrorPadGradGrad(op, grad):
   # pylint: disable=protected-access
   return [gen_array_ops._mirror_pad(grad, op.inputs[1], mode=mode), None]
   # pylint: enable=protected-access
+
+
+@ops.RegisterGradient("QuantizeAndDequantize")
+def _QuantizeAndDequantizeGrad(_, grad):
+  return grad

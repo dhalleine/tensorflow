@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -395,8 +395,6 @@ GraphConstructorOptions::GraphConstructorOptions(const OptimizerOptions& opts) {
   if (opts.opt_level() == OptimizerOptions::L0) {
     // No optimizations performed.
   } else if (opts.opt_level() == OptimizerOptions::L1) {
-    SetDoCSE(opts, true, this);
-  } else if (opts.opt_level() == OptimizerOptions::L2) {
     SetDoCSE(opts, true, this);
     SetDoConstantFolding(opts, true, this);
   }

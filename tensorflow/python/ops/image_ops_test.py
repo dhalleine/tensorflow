@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,10 +24,10 @@ import os
 import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
 
-from tensorflow.python.framework import test_util
+from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
+from tensorflow.python.framework import test_util
 from tensorflow.python.ops import array_ops
-from tensorflow.python.ops import constant_op
 from tensorflow.python.ops import image_ops
 from tensorflow.python.ops import io_ops
 from tensorflow.python.platform import googletest
@@ -1292,11 +1292,13 @@ class ConvertImageTest(test_util.TensorFlowTestCase):
       self.assertAllClose(y.eval(), y_np, atol=1e-5)
 
   def testNoConvert(self):
-    # Make sure converting to the same data type creates no ops
+    # Make sure converting to the same data type creates only an identity op
     with self.test_session():
       image = constant_op.constant([1], dtype=dtypes.uint8)
+      image_ops.convert_image_dtype(image, dtypes.uint8)
       y = image_ops.convert_image_dtype(image, dtypes.uint8)
-      self.assertEquals(image, y)
+      self.assertEquals(y.op.type, 'Identity')
+      self.assertEquals(y.op.inputs[0], image)
 
   def testConvertBetweenInteger(self):
     # Make sure converting to between integer types scales appropriately

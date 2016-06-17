@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -39,11 +39,6 @@ string CEscape(const string& src);
 //
 // NOTE: Does not support \u or \U!
 bool CUnescape(StringPiece source, string* dest, string* error);
-
-// If "text" can be successfully parsed as the ASCII representation of
-// an integer, sets "*val" to the value and returns true.  Otherwise,
-// returns false.
-bool NumericParse32(const string& text, int32* val);
 
 // Removes any trailing whitespace from "*s".
 void StripTrailingWhitespace(string* s);

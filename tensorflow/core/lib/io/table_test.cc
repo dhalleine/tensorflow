@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -284,13 +284,13 @@ class Harness : public ::testing::Test {
     constructor_->Add(key, value);
   }
 
-  void Test(random::SimplePhilox* rnd) {
+  void Test(random::SimplePhilox* rnd, int num_random_access_iters = 200) {
     std::vector<string> keys;
     KVMap data;
     constructor_->Finish(options_, &keys, &data);
 
     TestForwardScan(keys, data);
-    TestRandomAccess(rnd, keys, data);
+    TestRandomAccess(rnd, keys, data, num_random_access_iters);
   }
 
   void TestForwardScan(const std::vector<string>& keys, const KVMap& data) {
@@ -307,13 +307,14 @@ class Harness : public ::testing::Test {
   }
 
   void TestRandomAccess(random::SimplePhilox* rnd,
-                        const std::vector<string>& keys, const KVMap& data) {
+                        const std::vector<string>& keys, const KVMap& data,
+                        int num_random_access_iters) {
     static const bool kVerbose = false;
     Iterator* iter = constructor_->NewIterator();
     ASSERT_TRUE(!iter->Valid());
     KVMap::const_iterator model_iter = data.begin();
     if (kVerbose) fprintf(stderr, "---\n");
-    for (int i = 0; i < 200; i++) {
+    for (int i = 0; i < num_random_access_iters; i++) {
       const int toss = rnd->Uniform(3);
       switch (toss) {
         case 0: {
@@ -476,7 +477,7 @@ TEST_F(Harness, SimpleMultiBigValues) {
     Add("anext", string(10000000, 'a'));
     Add("anext2", string(10000000, 'b'));
     Add("azz", "tiny");
-    Test(&rnd);
+    Test(&rnd, 100 /* num_random_access_iters */);
   }
 }
 
@@ -581,9 +582,9 @@ TEST(TableTest, ApproximateOffsetOfCompressed) {
   ASSERT_TRUE(Between(c.ApproximateOffsetOf("abc"), 0, 0));
   ASSERT_TRUE(Between(c.ApproximateOffsetOf("k01"), 0, 0));
   ASSERT_TRUE(Between(c.ApproximateOffsetOf("k02"), 10, 100));
-  ASSERT_TRUE(Between(c.ApproximateOffsetOf("k03"), 2000, 3000));
-  ASSERT_TRUE(Between(c.ApproximateOffsetOf("k04"), 2000, 3000));
-  ASSERT_TRUE(Between(c.ApproximateOffsetOf("xyz"), 4000, 6000));
+  ASSERT_TRUE(Between(c.ApproximateOffsetOf("k03"), 2000, 4000));
+  ASSERT_TRUE(Between(c.ApproximateOffsetOf("k04"), 2000, 4000));
+  ASSERT_TRUE(Between(c.ApproximateOffsetOf("xyz"), 4000, 7000));
 }
 
 TEST(TableTest, SeekToFirstKeyDoesNotReadTooMuch) {

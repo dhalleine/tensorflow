@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -27,11 +27,11 @@ import tensorflow as tf
 from google.protobuf import text_format
 
 from tensorflow.core.framework import graph_pb2
+from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import errors
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import test_util
 from tensorflow.python.platform import googletest
-from tensorflow.python.ops import constant_op
 from tensorflow.python.ops import logging_ops
 
 
@@ -165,6 +165,19 @@ class TestUtilTest(test_util.TensorFlowTestCase):
     self.assertAllClose(7, 7 + 1e-8)
     with self.assertRaisesRegexp(AssertionError, r"Not equal to tolerance"):
       self.assertAllClose(7, 8)
+
+  def testArrayNear(self):
+    a = [1, 2]
+    b = [1, 2, 5]
+    with self.assertRaises(AssertionError):
+      self.assertArrayNear(a, b, 0.001)
+    a = [1, 2]
+    b = [[1, 2], [3, 4]]
+    with self.assertRaises(TypeError):
+      self.assertArrayNear(a, b, 0.001)
+    a = [1, 2]
+    b = [1, 2]
+    self.assertArrayNear(a, b, 0.001)
 
   def testForceGPU(self):
     with self.assertRaisesRegexp(errors.InvalidArgumentError,

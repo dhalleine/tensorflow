@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -71,11 +71,13 @@ struct BatchSelectFunctor<GPUDevice, T> {
   template struct SelectFunctor<GPUDevice, T>; \
   template struct BatchSelectFunctor<GPUDevice, T>;
 
+SELECT_FUNCTOR(Eigen::half);
 SELECT_FUNCTOR(float);
 SELECT_FUNCTOR(double);
 SELECT_FUNCTOR(int32);
 SELECT_FUNCTOR(int64);
 SELECT_FUNCTOR(complex64);
+SELECT_FUNCTOR(complex128);
 
 #undef SELECT_FUNCTOR
 

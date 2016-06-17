@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,6 +19,8 @@ limitations under the License.
 #include <vector>
 
 #include "tensorflow/core/framework/attr_value_util.h"
+#include "tensorflow/core/framework/graph.pb_text.h"
+#include "tensorflow/core/framework/kernel_def.pb_text.h"
 #include "tensorflow/core/framework/log_memory.h"
 #include "tensorflow/core/framework/memory_types.h"
 #include "tensorflow/core/framework/node_def_util.h"
@@ -89,13 +91,15 @@ OpKernel::OpKernel(OpKernelConstruction* context)
   OP_REQUIRES_OK(context,
                  NameRangesForNode(def_, context->op_def(), &input_name_map_,
                                    &output_name_map_));
+  OP_REQUIRES_OK(context, CheckOpDeprecation(context->op_def(),
+                                             context->graph_def_version()));
 }
 
 OpKernel::~OpKernel() {}
 
-Status OpKernel::InputRange(const string& input_name, int* start,
+Status OpKernel::InputRange(StringPiece input_name, int* start,
                             int* stop) const {
-  const auto result = input_name_map_.find(input_name);
+  const auto result = input_name_map_.find(input_name.ToString());
   if (result == input_name_map_.end()) {
     return errors::InvalidArgument("Unknown input name: ", input_name);
   } else {
@@ -105,9 +109,9 @@ Status OpKernel::InputRange(const string& input_name, int* start,
   }
 }
 
-Status OpKernel::OutputRange(const string& output_name, int* start,
+Status OpKernel::OutputRange(StringPiece output_name, int* start,
                              int* stop) const {
-  const auto result = output_name_map_.find(output_name);
+  const auto result = output_name_map_.find(output_name.ToString());
   if (result == output_name_map_.end()) {
     return errors::InvalidArgument("Unknown output name: ", output_name);
   } else {
@@ -188,7 +192,8 @@ Status OpKernelConstruction::allocate_persistent(
 // OpKernelContext -----------------------------------------------------------
 
 OpKernelContext::OpKernelContext(Params* params)
-    : OpKernelContext(params, params->op_kernel->output_types().size()) {}
+    : OpKernelContext(
+          params, static_cast<int>(params->op_kernel->output_types().size())) {}
 OpKernelContext::OpKernelContext(Params* params, int noutputs)
     : params_(params), outputs_(noutputs) {
   Allocator* eigen_gpu_allocator = get_allocator(AllocatorAttributes());
@@ -197,6 +202,9 @@ OpKernelContext::OpKernelContext(Params* params, int noutputs)
                                          params_->op_device_context,
                                          eigen_gpu_allocator);
   record_tensor_accesses_ = params_->device->RequiresRecordingAccessedTensors();
+  if (record_tensor_accesses_) {
+    referenced_tensors_.Init();
+  }
 }
 
 OpKernelContext::~OpKernelContext() {
@@ -205,6 +213,7 @@ OpKernelContext::~OpKernelContext() {
       delete value.tensor;
     }
   }
+  if (record_tensor_accesses_) referenced_tensors_.Destroy();
 }
 
 Allocator* OpKernelContext::get_allocator(AllocatorAttributes attr) {
@@ -233,10 +242,10 @@ void OpKernelContext::SetStatus(const Status& status) {
 void OpKernelContext::really_record_tensor_reference(const Tensor& tensor) {
   mutex_lock l(mu_);
   // Keep a reference to the underlying memory around.
-  referenced_tensors_.Add(tensor);
+  referenced_tensors_->Add(tensor);
 }
 
-Status OpKernelContext::input(const string& name, const Tensor** tensor) {
+Status OpKernelContext::input(StringPiece name, const Tensor** tensor) {
   int start, stop;
   TF_RETURN_IF_ERROR(params_->op_kernel->InputRange(name, &start, &stop));
   if (stop != start + 1) {
@@ -254,7 +263,7 @@ Status OpKernelContext::input(const string& name, const Tensor** tensor) {
   return Status::OK();
 }
 
-Status OpKernelContext::input_ref_mutex(const string& name, mutex** out_mutex) {
+Status OpKernelContext::input_ref_mutex(StringPiece name, mutex** out_mutex) {
   int start, stop;
   TF_RETURN_IF_ERROR(params_->op_kernel->InputRange(name, &start, &stop));
   if (stop != start + 1) {
@@ -329,7 +338,7 @@ void OpKernelContext::delete_ref_input(int index, bool lock_held) {
   }
 }
 
-Status OpKernelContext::mutable_input(const string& name, Tensor* tensor,
+Status OpKernelContext::mutable_input(StringPiece name, Tensor* tensor,
                                       bool lock_held) {
   int start, stop;
   TF_RETURN_IF_ERROR(params_->op_kernel->InputRange(name, &start, &stop));
@@ -353,7 +362,7 @@ Status OpKernelContext::mutable_input(const string& name, Tensor* tensor,
   return Status::OK();
 }
 
-Status OpKernelContext::replace_ref_input(const string& name,
+Status OpKernelContext::replace_ref_input(StringPiece name,
                                           const Tensor& tensor,
                                           bool lock_held) {
   int start, stop;
@@ -371,14 +380,14 @@ Status OpKernelContext::replace_ref_input(const string& name,
   return Status::OK();
 }
 
-Status OpKernelContext::input_list(const string& name, OpInputList* list) {
+Status OpKernelContext::input_list(StringPiece name, OpInputList* list) {
   int start, stop;
   TF_RETURN_IF_ERROR(params_->op_kernel->InputRange(name, &start, &stop));
   *list = OpInputList(this, start, stop);
   return Status::OK();
 }
 
-Status OpKernelContext::mutable_input_list(const string& name,
+Status OpKernelContext::mutable_input_list(StringPiece name,
                                            OpMutableInputList* list) {
   int start, stop;
   TF_RETURN_IF_ERROR(params_->op_kernel->InputRange(name, &start, &stop));
@@ -386,7 +395,7 @@ Status OpKernelContext::mutable_input_list(const string& name,
   return Status::OK();
 }
 
-Status OpKernelContext::output_list(const string& name, OpOutputList* list) {
+Status OpKernelContext::output_list(StringPiece name, OpOutputList* list) {
   int start, stop;
   TF_RETURN_IF_ERROR(params_->op_kernel->OutputRange(name, &start, &stop));
   *list = OpOutputList(this, start, stop);
@@ -401,7 +410,7 @@ Status OpKernelContext::allocate_output(int index, const TensorShape& shape,
   return allocate_output(index, shape, output, attr);
 }
 
-Status OpKernelContext::allocate_output(const string& name,
+Status OpKernelContext::allocate_output(StringPiece name,
                                         const TensorShape& shape,
                                         Tensor** tensor) {
   int start, stop;
@@ -415,7 +424,7 @@ Status OpKernelContext::allocate_output(const string& name,
   return allocate_output(start, shape, tensor);
 }
 
-Status OpKernelContext::allocate_output(const string& name,
+Status OpKernelContext::allocate_output(StringPiece name,
                                         const TensorShape& shape,
                                         Tensor** tensor,
                                         AllocatorAttributes attr) {
@@ -442,12 +451,12 @@ Status OpKernelContext::allocate_tensor(
     return errors::ResourceExhausted("OOM when allocating tensor with shape",
                                      shape.DebugString());
   }
-  if (LogMemory::IsEnabled()) {
+  if (params_->log_memory) {
     LogMemory::RecordTensorAllocation(params_->op_kernel->name(),
                                       params_->step_id, new_tensor);
   }
-  *out_tensor = new_tensor;
   record_tensor_reference(new_tensor);
+  *out_tensor = std::move(new_tensor);
   return Status::OK();
 }
 
@@ -494,7 +503,7 @@ Status OpKernelContext::allocate_persistent(DataType type,
   return s;
 }
 
-Status OpKernelContext::set_output(const string& name, const Tensor& tensor) {
+Status OpKernelContext::set_output(StringPiece name, const Tensor& tensor) {
   int start, stop;
   TF_RETURN_IF_ERROR(params_->op_kernel->OutputRange(name, &start, &stop));
   if (stop != start + 1) {
@@ -525,7 +534,7 @@ void OpKernelContext::set_output_ref(int index, mutex* mu,
   outputs_[index] = TensorValue(mu, tensor_for_ref);
 }
 
-Status OpKernelContext::set_output_ref(const string& name, mutex* mu,
+Status OpKernelContext::set_output_ref(StringPiece name, mutex* mu,
                                        Tensor* tensor_for_ref) {
   int start, stop;
   TF_RETURN_IF_ERROR(params_->op_kernel->OutputRange(name, &start, &stop));
@@ -539,7 +548,7 @@ Status OpKernelContext::set_output_ref(const string& name, mutex* mu,
   return Status::OK();
 }
 
-Status OpKernelContext::mutable_output(const string& name, Tensor** tensor) {
+Status OpKernelContext::mutable_output(StringPiece name, Tensor** tensor) {
   int start, stop;
   TF_RETURN_IF_ERROR(params_->op_kernel->OutputRange(name, &start, &stop));
   if (stop != start + 1) {
@@ -552,7 +561,7 @@ Status OpKernelContext::mutable_output(const string& name, Tensor** tensor) {
   return Status::OK();
 }
 
-Status OpKernelContext::release_output(const string& name, TensorValue* value) {
+Status OpKernelContext::release_output(StringPiece name, TensorValue* value) {
   int start, stop;
   TF_RETURN_IF_ERROR(params_->op_kernel->OutputRange(name, &start, &stop));
   if (stop != start + 1) {
@@ -594,10 +603,11 @@ Status OpKernelContext::MatchSignature(const DataTypeSlice expected_inputs,
 // OpKernel registration ------------------------------------------------------
 
 struct KernelRegistration {
-  KernelRegistration(const KernelDef& d,
+  KernelRegistration(const KernelDef& d, StringPiece c,
                      kernel_factory::OpKernelRegistrar::Factory f)
-      : def(d), factory(f) {}
+      : def(d), kernel_class_name(c.ToString()), factory(f) {}
   const KernelDef def;
+  const string kernel_class_name;
   const kernel_factory::OpKernelRegistrar::Factory factory;
 };
 
@@ -615,8 +625,8 @@ static KernelRegistry* GlobalKernelRegistryTyped() {
   return reinterpret_cast<KernelRegistry*>(GlobalKernelRegistry());
 }
 
-static string Key(const string& op_type, DeviceType device_type,
-                  const string& label) {
+static string Key(StringPiece op_type, DeviceType device_type,
+                  StringPiece label) {
   return strings::StrCat(op_type, ":", DeviceTypeString(device_type), ":",
                          label);
 }
@@ -624,12 +634,13 @@ static string Key(const string& op_type, DeviceType device_type,
 namespace kernel_factory {
 
 void OpKernelRegistrar::InitInternal(const KernelDef* kernel_def,
+                                     StringPiece kernel_class_name,
                                      Factory factory) {
   const string key =
       Key(kernel_def->op(), DeviceType(kernel_def->device_type()),
           kernel_def->label());
-  GlobalKernelRegistryTyped()->insert(
-      std::make_pair(key, KernelRegistration(*kernel_def, factory)));
+  GlobalKernelRegistryTyped()->insert(std::make_pair(
+      key, KernelRegistration(*kernel_def, kernel_class_name, factory)));
   delete kernel_def;
 }
 
@@ -655,7 +666,7 @@ Status AttrsMatch(const NodeDef& node_def, const KernelDef& kernel_def,
   for (const auto& constraint : kernel_def.constraint()) {
     if (constraint.allowed_values().list().type_size() == 0) {
       return errors::Unimplemented(
-          "KernelDef '", kernel_def.ShortDebugString(),
+          "KernelDef '", ProtoShortDebugString(kernel_def),
           " has constraint on attr '", constraint.name(),
           "' with unsupported type: ",
           SummarizeAttrValue(constraint.allowed_values()));
@@ -670,7 +681,7 @@ Status AttrsMatch(const NodeDef& node_def, const KernelDef& kernel_def,
       } else {
         if (!AttrValueHasType(*found, "list(type)").ok()) {
           return errors::InvalidArgument(
-              "KernelDef '", kernel_def.ShortDebugString(),
+              "KernelDef '", ProtoShortDebugString(kernel_def),
               "' has constraint on attr '", constraint.name(),
               "' that has value '", SummarizeAttrValue(*found),
               "' that does not have type 'type' or 'list(type)' in NodeDef "
@@ -689,7 +700,7 @@ Status AttrsMatch(const NodeDef& node_def, const KernelDef& kernel_def,
       return errors::InvalidArgument(
           "OpKernel '", kernel_def.op(), "' has constraint on attr '",
           constraint.name(), "' not in NodeDef '", SummarizeNodeDef(node_def),
-          "', KernelDef: '", kernel_def.ShortDebugString(), "'");
+          "', KernelDef: '", ProtoShortDebugString(kernel_def), "'");
     }
   }
   *match = true;
@@ -712,8 +723,9 @@ Status FindKernelRegistration(DeviceType device_type, const NodeDef& node_def,
       if (*reg != nullptr) {
         return errors::InvalidArgument(
             "Multiple OpKernel registrations match NodeDef '",
-            SummarizeNodeDef(node_def), "': '", (*reg)->def.ShortDebugString(),
-            "' and '", iter->second.def.ShortDebugString(), "'");
+            SummarizeNodeDef(node_def), "': '",
+            ProtoShortDebugString((*reg)->def), "' and '",
+            ProtoShortDebugString(iter->second.def), "'");
       }
       *reg = &iter->second;
     }
@@ -724,7 +736,7 @@ Status FindKernelRegistration(DeviceType device_type, const NodeDef& node_def,
 }  // namespace
 
 Status FindKernelDef(DeviceType device_type, const NodeDef& node_def,
-                     const KernelDef** def) {
+                     const KernelDef** def, string* kernel_class_name) {
   const KernelRegistration* reg = nullptr;
   TF_RETURN_IF_ERROR(FindKernelRegistration(device_type, node_def, &reg));
   if (reg == nullptr) {
@@ -733,7 +745,8 @@ Status FindKernelDef(DeviceType device_type, const NodeDef& node_def,
                             " devices compatible with node ",
                             SummarizeNodeDef(node_def));
   }
-  *def = &reg->def;
+  if (def != nullptr) *def = &reg->def;
+  if (kernel_class_name != nullptr) *kernel_class_name = reg->kernel_class_name;
   return Status::OK();
 }
 
@@ -744,9 +757,9 @@ Status SupportedDeviceTypesForNode(
   // DynamicPlacer) to consider the possibility that 'def' is call to
   // a user-defined function and only calls this
   // SupportedDeviceTypesForNode for primitive ops.
-  Status s;
-  const OpDef* op_def = OpRegistry::Global()->LookUp(def.op(), &s);
-  if (op_def) {
+  const OpRegistrationData* op_reg_data;
+  const Status s = OpRegistry::Global()->LookUp(def.op(), &op_reg_data);
+  if (s.ok()) {
     for (const DeviceType& device_type : prioritized_types) {
       const KernelRegistration* reg = nullptr;
       TF_RETURN_IF_ERROR(FindKernelRegistration(device_type, def, &reg));
@@ -777,9 +790,9 @@ Status CreateOpKernel(DeviceType device_type, DeviceBase* device,
   VLOG(1) << "Instantiating kernel for node: " << SummarizeNodeDef(node_def);
 
   // Look up the Op registered for this op name.
-  Status s;
-  const OpDef* op_def = OpRegistry::Global()->LookUp(node_def.op(), &s);
-  if (op_def == nullptr) return s;
+  const OpDef* op_def = nullptr;
+  Status s = OpRegistry::Global()->LookUpOpDef(node_def.op(), &op_def);
+  if (!s.ok()) return s;
 
   // Validate node_def against OpDef.
   s = ValidateNodeDef(node_def, *op_def);
@@ -832,7 +845,7 @@ Status CreateOpKernel(DeviceType device_type, DeviceBase* device,
 
 namespace {
 
-bool FindArgInOp(const string& arg_name,
+bool FindArgInOp(StringPiece arg_name,
                  const protobuf::RepeatedPtrField<OpDef::ArgDef>& args) {
   for (const auto& arg : args) {
     if (arg_name == arg.name()) {
@@ -845,22 +858,23 @@ bool FindArgInOp(const string& arg_name,
 }  // namespace
 
 Status ValidateKernelRegistrations(const OpRegistryInterface& op_registry) {
-  Status unused_status;
   for (const auto& key_registration : *GlobalKernelRegistryTyped()) {
     const KernelDef& kernel_def(key_registration.second.def);
-    const OpDef* op_def = op_registry.LookUp(kernel_def.op(), &unused_status);
-    if (op_def == nullptr) {
+    const OpRegistrationData* op_reg_data;
+    const Status status = op_registry.LookUp(kernel_def.op(), &op_reg_data);
+    if (!status.ok()) {
       // TODO(josh11b): Make this a hard error.
-      LOG(ERROR) << "OpKernel ('" << kernel_def.ShortDebugString()
+      LOG(ERROR) << "OpKernel ('" << ProtoShortDebugString(kernel_def)
                  << "') for unknown op: " << kernel_def.op();
       continue;
     }
+    const OpDef& op_def = op_reg_data->op_def;
     for (const auto& host_memory_arg : kernel_def.host_memory_arg()) {
-      if (!FindArgInOp(host_memory_arg, op_def->input_arg()) &&
-          !FindArgInOp(host_memory_arg, op_def->output_arg())) {
+      if (!FindArgInOp(host_memory_arg, op_def.input_arg()) &&
+          !FindArgInOp(host_memory_arg, op_def.output_arg())) {
         return errors::InvalidArgument("HostMemory arg '", host_memory_arg,
                                        "' not found in OpDef: ",
-                                       SummarizeOpDef(*op_def));
+                                       SummarizeOpDef(op_def));
       }
     }
   }

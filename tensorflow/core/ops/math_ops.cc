@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,8 +15,13 @@ limitations under the License.
 
 #include "tensorflow/core/framework/numeric_op.h"
 #include "tensorflow/core/framework/op.h"
+#include "tensorflow/core/framework/shape_inference.h"
 
 namespace tensorflow {
+
+typedef shape_inference::Dimension Dimension;
+typedef shape_inference::InferenceContext InferenceContext;
+typedef shape_inference::Shape Shape;
 
 REGISTER_OP("AddN")
     .Input("inputs: N * T")
@@ -25,6 +30,16 @@ REGISTER_OP("AddN")
     .Attr("T: numbertype")
     .SetIsCommutative()
     .SetIsAggregate()
+    .SetShapeFn(OpShapeInferenceFn([](InferenceContext* c) {
+      const Shape* cur = c->input(c->num_inputs() - 1);
+      for (int i = c->num_inputs() - 2; i >= 0; --i) {
+        TF_RETURN_WITH_CONTEXT_IF_ERROR(c->Merge(c->input(i), cur, &cur),
+                                        "From merging shape ", i,
+                                        " with other shapes.");
+      }
+      c->set_output(0, cur);
+      return Status::OK();
+    }))
     .Doc(R"doc(
 Add all input tensors element wise.
 
@@ -36,8 +51,8 @@ inputs: Must all be the same size and shape.
 REGISTER_OP("BatchMatMul")
     .Input("x: T")
     .Input("y: T")
-    .Output("out: T")
-    .Attr("T: {float, double, int32, complex64}")
+    .Output("output: T")
+    .Attr("T: {half, float, double, int32, complex64, complex128}")
     .Attr("adj_x: bool = false")
     .Attr("adj_y: bool = false")
     .Doc(R"doc(
@@ -60,11 +75,11 @@ The output tensor is 3-D or higher with shape `[..., r_o, c_o]`, where:
 
 It is computed as:
 
-    out[..., :, :] = matrix(x[..., :, :]) * matrix(y[..., :, :])
+    output[..., :, :] = matrix(x[..., :, :]) * matrix(y[..., :, :])
 
 x: 3-D or higher with shape `[..., r_x, c_x]`.
 y: 3-D or higher with shape `[..., r_y, c_y]`.
-out: 3-D or higher with shape `[..., r_o, c_o]`
+output: 3-D or higher with shape `[..., r_o, c_o]`
 adj_x: If `True`, adjoint the slices of `x`. Defaults to `False`.
 adj_y: If `True`, adjoint the slices of `y`. Defaults to `False`.
 )doc");
@@ -101,7 +116,7 @@ _HostCast requires its input and produces its output in host memory.
 REGISTER_OP("Abs")
     .Input("x: T")
     .Output("y: T")
-    .Attr("T: {float, double, int32, int64}")
+    .Attr("T: {half, float, double, int32, int64}")
     .Doc(R"doc(
 Computes the absolute value of a tensor.
 
@@ -111,15 +126,17 @@ an output element, this operation computes \\(y = |x|\\).
 )doc");
 
 REGISTER_OP("ComplexAbs")
-    .Input("x: complex64")
-    .Output("y: float")
+    .Input("x: T")
+    .Output("y: Tout")
+    .Attr("T: {complex64, complex128} = DT_COMPLEX64")
+    .Attr("Tout: {float, double} = DT_FLOAT")
     .Doc(R"doc(
 Computes the complex absolute value of a tensor.
 
 Given a tensor `x` of complex numbers, this operation returns a tensor of type
-`float` that is the absolute value of each element in `x`. All elements in `x`
-must be complex numbers of the form \\(a + bj\\). The absolute value is
-computed as \\( \sqrt{a^2 + b^2}\\).
+`float` or `double` that is the absolute value of each element in `x`. All
+elements in `x` must be complex numbers of the form \\(a + bj\\). The absolute
+value is computed as \\( \sqrt{a^2 + b^2}\\).
 
 For example:
 
@@ -132,7 +149,15 @@ tf.complex_abs(x) ==> [5.25594902, 6.60492229]
 // Declares cwise unary operations signature: 't -> 't
 #define UNARY()                      \
   Input("x: T").Output("y: T").Attr( \
-      "T: {float, double, int32, complex64, int64}")
+      "T: {half, float, double, int32, int64, complex64, complex128}")
+
+#define UNARY_REAL()                 \
+  Input("x: T").Output("y: T").Attr( \
+      "T: {half, float, double}")
+
+#define UNARY_COMPLEX()              \
+  Input("x: T").Output("y: T").Attr( \
+      "T: {half, float, double, complex64, complex128}")
 
 REGISTER_OP("Neg")
     .UNARY()
@@ -156,65 +181,65 @@ I.e., \\(y = x * x = x^2\\).
 )doc");
 
 REGISTER_OP("Sqrt")
-    .UNARY()
+    .UNARY_COMPLEX()
     .Doc(R"doc(
 Computes square root of x element-wise.
 I.e., \\(y = \sqrt{x} = x^{1/2}\\).
 )doc");
 
 REGISTER_OP("Rsqrt")
-    .UNARY()
+    .UNARY_COMPLEX()
     .Doc(R"doc(
 Computes reciprocal of square root of x element-wise.
 I.e., \\(y = 1 / \sqrt{x}\\).
 )doc");
 
 REGISTER_OP("Exp")
-    .UNARY()
+    .UNARY_COMPLEX()
     .Doc(R"doc(
 Computes exponential of x element-wise.  \\(y = e^x\\).
 )doc");
 
 REGISTER_OP("Log")
-    .UNARY()
+    .UNARY_COMPLEX()
     .Doc(R"doc(
 Computes natural logarithm of x element-wise.
 I.e., \\(y = \log_e x\\).
 )doc");
 
 REGISTER_OP("Tanh")
-    .UNARY()
+    .UNARY_COMPLEX()
     .Doc(R"doc(
 Computes hyperbolic tangent of `x` element-wise.
 )doc");
 
 REGISTER_OP("Lgamma")
-    .UNARY()
+    .UNARY_REAL()
     .Doc(R"doc(
 Computes the log of the absolute value of `Gamma(x)` element-wise.
 )doc");
 
 REGISTER_OP("Digamma")
-    .UNARY()
+    .UNARY_REAL()
     .Doc(R"doc(
 Computes Psi, the derivative of Lgamma (the log of the absolute value of
 `Gamma(x)`), element-wise.
 )doc");
 
 REGISTER_OP("Erf")
-    .UNARY()
+    .UNARY_REAL()
     .Doc(R"doc(
 Computes the Gauss error function of `x` element-wise.
 )doc");
 
 REGISTER_OP("Erfc")
-    .UNARY()
+    .UNARY_REAL()
     .Doc(R"doc(
 Computes the complementary error function of `x` element-wise.
 )doc");
 
 REGISTER_OP("Sigmoid")
-    .UNARY()
+    .UNARY_COMPLEX()
     .Doc(R"doc(
 Computes sigmoid of `x` element-wise.
 
@@ -222,23 +247,49 @@ Specifically, `y = 1 / (1 + exp(-x))`.
 )doc");
 
 REGISTER_OP("Sin")
-    .UNARY()
+    .UNARY_COMPLEX()
     .Doc(R"doc(
 Computes sin of x element-wise.
 )doc");
 
 REGISTER_OP("Cos")
-    .UNARY()
+    .UNARY_COMPLEX()
     .Doc(R"doc(
 Computes cos of x element-wise.
 )doc");
 
+REGISTER_OP("Tan")
+    .UNARY()
+    .Doc(R"doc(
+Computes tan of x element-wise.
+)doc");
+
+REGISTER_OP("Asin")
+    .UNARY()
+    .Doc(R"doc(
+Computes asin of x element-wise.
+)doc");
+
+REGISTER_OP("Acos")
+    .UNARY()
+    .Doc(R"doc(
+Computes acos of x element-wise.
+)doc");
+
+REGISTER_OP("Atan")
+    .UNARY()
+    .Doc(R"doc(
+Computes atan of x element-wise.
+)doc");
+
 #undef UNARY
+#undef UNARY_REAL
+#undef UNARY_COMPLEX
 
 REGISTER_OP("IsNan")
     .Input("x: T")
     .Output("y: bool")
-    .Attr("T: {float, double}")
+    .Attr("T: {half, float, double}")
     .Doc(R"doc(
 Returns which elements of x are NaN.
 )doc");
@@ -246,7 +297,7 @@ Returns which elements of x are NaN.
 REGISTER_OP("IsInf")
     .Input("x: T")
     .Output("y: bool")
-    .Attr("T: {float, double}")
+    .Attr("T: {half, float, double}")
     .Doc(R"doc(
 Returns which elements of x are Inf.
 )doc");
@@ -254,7 +305,7 @@ Returns which elements of x are Inf.
 REGISTER_OP("IsFinite")
     .Input("x: T")
     .Output("y: bool")
-    .Attr("T: {float, double}")
+    .Attr("T: {half, float, double}")
     .Doc(R"doc(
 Returns which elements of x are finite.
 )doc");
@@ -262,17 +313,19 @@ Returns which elements of x are finite.
 REGISTER_OP("Sign")
     .Input("x: T")
     .Output("y: T")
-    .Attr("T: {float, double, int32, int64}")
+    .Attr("T: {half, float, double, int32, int64, complex64, complex128}")
     .Doc(R"doc(
 Returns an element-wise indication of the sign of a number.
 
-y = sign(x) = -1 if x < 0; 0 if x == 0; 1 if x > 0.
+`y = sign(x) = -1` if `x < 0`; 0 if `x == 0`; 1 if `x > 0`.
+
+For complex numbers, `y = sign(x) = x / |x|` if `x != 0`, otherwise `y = 0`.
 )doc");
 
 REGISTER_OP("Floor")
     .Input("x: T")
     .Output("y: T")
-    .Attr("T: {float, double}")
+    .Attr("T: {half, float, double}")
     .Doc(R"doc(
 Returns element-wise largest integer not greater than x.
 )doc");
@@ -280,7 +333,7 @@ Returns element-wise largest integer not greater than x.
 REGISTER_OP("Ceil")
     .Input("x: T")
     .Output("y: T")
-    .Attr("T: {float, double}")
+    .Attr("T: {half, float, double}")
     .Doc(R"doc(
 Returns element-wise smallest integer in not less than x.
 )doc");
@@ -289,11 +342,11 @@ Returns element-wise smallest integer in not less than x.
 
 #define BINARY_MORE()                              \
   Input("x: T").Input("y: T").Output("z: T").Attr( \
-      "T: {float, double, uint8, int8, int16, int32, int64, complex64}")
+      "T: {half, float, double, uint8, int8, int16, int32, int64, complex64, complex128}")
 
 #define BINARY_FEWER()                             \
   Input("x: T").Input("y: T").Output("z: T").Attr( \
-      "T: {float, double, int32, complex64, int64}")
+      "T: {half, float, double, int32, int64, complex64, complex128}")
 
 // TODO(mrry): Restore `SetIsCommutative()` for non-string types.
 REGISTER_OP("Add")
@@ -301,8 +354,8 @@ REGISTER_OP("Add")
     .Input("y: T")
     .Output("z: T")
     .Attr(
-        "T: {float, double, uint8, int8, int16, int32, int64, complex64, "
-        "string}")
+        "T: {half, float, double, uint8, int8, int16, int32, int64, complex64, "
+        "complex128, string}")
     .Doc(R"doc(
 Returns x + y element-wise.
 
@@ -342,7 +395,7 @@ REGISTER_OP("Maximum")
     .Input("x: T")
     .Input("y: T")
     .Output("z: T")
-    .Attr("T: {float, double, int32, int64}")
+    .Attr("T: {half, float, double, int32, int64}")
     .SetIsCommutative()
     .Doc(R"doc(
 Returns the max of x and y (i.e. x > y ? x : y) element-wise, broadcasts.
@@ -352,7 +405,7 @@ REGISTER_OP("Minimum")
     .Input("x: T")
     .Input("y: T")
     .Output("z: T")
-    .Attr("T: {float, double, int32, int64}")
+    .Attr("T: {half, float, double, int32, int64}")
     .SetIsCommutative()
     .Doc(R"doc(
 Returns the min of x and y (i.e. x < y ? x : y) element-wise, broadcasts.
@@ -371,7 +424,7 @@ REGISTER_OP("Pow")
     .Input("x: T")
     .Input("y: T")
     .Output("z: T")
-    .Attr("T: {float, double, int32, complex64, int64}")
+    .Attr("T: {half, float, double, int32, int64, complex64, complex128}")
     .Doc(R"doc(
 Computes the power of one value to another.
 
@@ -383,6 +436,83 @@ corresponding elements in `x` and `y`. For example:
 # tensor 'y' is [[8, 16], [2, 3]]
 tf.pow(x, y) ==> [[256, 65536], [9, 27]]
 ```
+)doc");
+
+REGISTER_OP("Igammac")
+    .Input("a: T")
+    .Input("x: T")
+    .Output("z: T")
+    .Attr("T: {float, double}")
+    .Doc(R"doc(
+Compute the upper regularized incomplete Gamma function `Q(a, x)`.
+
+The upper regularized incomplete Gamma function is defined as:
+
+```
+Q(a, x) = Gamma(a, x) / Gamma(x) = 1 - P(a, x)
+```
+where
+```
+Gamma(a, x) = int_{x}^{\infty} t^{a-1} exp(-t) dt
+```
+is the upper incomplete Gama function.
+
+Note, above `P(a, x)` (`Igamma`) is the lower regularized complete
+Gamma function.
+)doc");
+
+REGISTER_OP("Igamma")
+    .Input("a: T")
+    .Input("x: T")
+    .Output("z: T")
+    .Attr("T: {float, double}")
+    .Doc(R"doc(
+Compute the lower regularized incomplete Gamma function `Q(a, x)`.
+
+The lower regularized incomplete Gamma function is defined as:
+
+```
+P(a, x) = gamma(a, x) / Gamma(x) = 1 - Q(a, x)
+```
+where
+```
+gamma(a, x) = int_{0}^{x} t^{a-1} exp(-t) dt
+```
+is the lower incomplete Gamma function.
+
+Note, above `Q(a, x)` (`Igammac`) is the upper regularized complete
+Gamma function.
+)doc");
+
+REGISTER_OP("Zeta")
+    .Input("x: T")
+    .Input("q: T")
+    .Output("z: T")
+    .Attr("T: {float, double}")
+    .Doc(R"doc(
+Compute the Hurwitz zeta function \\(\zeta(x, q)\\).
+
+The Hurwitz zeta function is defined as:
+
+```
+\zeta(x, q) = \sum_{n=0}^{\infty} (q + n)^{-x}
+```
+)doc");
+
+REGISTER_OP("Polygamma")
+    .Input("a: T")
+    .Input("x: T")
+    .Output("z: T")
+    .Attr("T: {float, double}")
+    .Doc(R"doc(
+Compute the polygamma function \\(\psi^{(n)}(x)\\).
+
+The polygamma function is defined as:
+
+```
+\psi^{(n)}(x) = \frac{d^n}{dx^n} \psi(x)
+```
+where \\(\psi(x)\\) is the digamma function.
 )doc");
 
 // --------------------------------------------------------------------------
@@ -420,24 +550,24 @@ Returns the truth value of (x >= y) element-wise.
 
 // --------------------------------------------------------------------------
 
-#define COMPARISON()                                                     \
-  Input("x: T").Input("y: T").Output("z: bool").SetIsCommutative().Attr( \
-      "T: {float, double, uint8, int8, int16, int32, int64, complex64, " \
-      "quint8, qint8, qint32, string}")
+#define EQUALITY_COMPARISON()                                                  \
+  Input("x: T").Input("y: T").Output("z: bool").SetIsCommutative().Attr(       \
+      "T: {half, float, double, uint8, int8, int16, int32, int64, complex64, " \
+      "quint8, qint8, qint32, string, bool, complex128}")
 
 REGISTER_OP("Equal")
-    .COMPARISON()
+    .EQUALITY_COMPARISON()
     .Doc(R"doc(
 Returns the truth value of (x == y) element-wise.
 )doc");
 
 REGISTER_OP("NotEqual")
-    .COMPARISON()
+    .EQUALITY_COMPARISON()
     .Doc(R"doc(
 Returns the truth value of (x != y) element-wise.
 )doc");
 
-#undef COMPARISON
+#undef EQUALITY_COMPARISON
 
 // --------------------------------------------------------------------------
 
@@ -471,7 +601,7 @@ REGISTER_OP("Select")
     .Input("condition: bool")
     .Input("t: T")
     .Input("e: T")
-    .Output("out: T")
+    .Output("output: T")
     .Attr("T: type")
     .Doc(R"doc(
 Selects elements from `t` or `e`, depending on `condition`.
@@ -518,7 +648,7 @@ t:= A `Tensor` which may have the same shape as `condition`.
     If `condition` is rank 1, `t` may have higher rank,
     but its first dimension must match the size of `condition`.
 e:= A `Tensor` with the same type and shape as `t`.
-out:= A `Tensor` with the same type and shape as `t` and `e`.
+output:= A `Tensor` with the same type and shape as `t` and `e`.
 )doc");
 
 // --------------------------------------------------------------------------
@@ -529,7 +659,7 @@ REGISTER_OP("MatMul")
     .Output("product: T")
     .Attr("transpose_a: bool = false")
     .Attr("transpose_b: bool = false")
-    .Attr("T: {float, double, int32, complex64}")
+    .Attr("T: {half, float, double, int32, complex64, complex128}")
     .Doc(R"doc(
 Multiply the matrix "a" by the matrix "b".
 
@@ -546,13 +676,15 @@ transpose_b: If true, "b" is transposed before multiplication.
 )doc");
 
 REGISTER_OP("SparseMatMul")
-    .Input("a: float")
-    .Input("b: float")
+    .Input("a: Ta")
+    .Input("b: Tb")
     .Output("product: float")
     .Attr("transpose_a: bool = false")
     .Attr("transpose_b: bool = false")
     .Attr("a_is_sparse: bool = false")
     .Attr("b_is_sparse: bool = false")
+    .Attr("Ta: {float, bfloat16} = DT_FLOAT")
+    .Attr("Tb: {float, bfloat16} = DT_FLOAT")
     .Doc(R"doc(
 Multiply matrix "a" by matrix "b".
 
@@ -694,7 +826,7 @@ REGISTER_OP("SegmentSum")
     .Input("data: T")
     .Input("segment_ids: Tindices")
     .Output("output: T")
-    .Attr("T: realnumbertype")
+    .Attr("T: numbertype")
     .Attr("Tindices: {int32,int64}")
     .Doc(R"doc(
 Computes the sum along segments of a tensor.
@@ -750,7 +882,7 @@ REGISTER_OP("SegmentProd")
     .Input("data: T")
     .Input("segment_ids: Tindices")
     .Output("output: T")
-    .Attr("T: realnumbertype")
+    .Attr("T: numbertype")
     .Attr("Tindices: {int32,int64}")
     .Doc(R"doc(
 Computes the product along segments of a tensor.
@@ -834,7 +966,7 @@ REGISTER_OP("UnsortedSegmentSum")
     .Input("segment_ids: Tindices")
     .Input("num_segments: int32")
     .Output("output: T")
-    .Attr("T: realnumbertype")
+    .Attr("T: numbertype")
     .Attr("Tindices: {int32,int64}")
     .Doc(R"doc(
 Computes the sum along segments of a tensor.
@@ -1091,9 +1223,11 @@ output: 1-D. The generated values.
 )doc");
 
 REGISTER_OP("Complex")
-    .Input("real: float")
-    .Input("imag: float")
-    .Output("out: complex64")
+    .Input("real: T")
+    .Input("imag: T")
+    .Output("out: Tout")
+    .Attr("T: {float, double} = DT_FLOAT")
+    .Attr("Tout: {complex64, complex128} = DT_COMPLEX64")
     .Doc(R"doc(
 Converts two real numbers to a complex number.
 
@@ -1114,84 +1248,199 @@ tf.complex(real, imag) ==> [[2.25 + 4.75j], [3.25 + 5.75j]]
 )doc");
 
 REGISTER_OP("Real")
-    .Input("in: complex64")
-    .Output("out: float")
+    .Input("input: T")
+    .Output("output: Tout")
+    .Attr("T: {complex64, complex128} = DT_COMPLEX64")
+    .Attr("Tout: {float, double} = DT_FLOAT")
     .Doc(R"doc(
 Returns the real part of a complex number.
 
-Given a tensor `in` of complex numbers, this operation returns a tensor of type
-`float` that is the real part of each element in `in`. All elements in `in`
-must be complex numbers of the form \\(a + bj\\), where *a* is the real part
-returned by this operation and *b* is the imaginary part.
+Given a tensor `input` of complex numbers, this operation returns a tensor of
+type `float` that is the real part of each element in `input`. All elements in
+`input` must be complex numbers of the form \\(a + bj\\), where *a* is the real
+ part returned by this operation and *b* is the imaginary part.
 
 For example:
 
 ```
-# tensor 'in' is [-2.25 + 4.75j, 3.25 + 5.75j]
-tf.real(in) ==> [-2.25, 3.25]
+# tensor 'input' is [-2.25 + 4.75j, 3.25 + 5.75j]
+tf.real(input) ==> [-2.25, 3.25]
 ```
 )doc");
 
 REGISTER_OP("Imag")
-    .Input("in: complex64")
-    .Output("out: float")
+    .Input("input: T")
+    .Output("output: Tout")
+    .Attr("T: {complex64, complex128} = DT_COMPLEX64")
+    .Attr("Tout: {float, double} = DT_FLOAT")
     .Doc(R"doc(
 Returns the imaginary part of a complex number.
 
-Given a tensor `in` of complex numbers, this operation returns a tensor of type
-`float` that is the imaginary part of each element in `in`. All elements in `in`
-must be complex numbers of the form \\(a + bj\\), where *a* is the real part
-and *b* is the imaginary part returned by this operation.
+Given a tensor `input` of complex numbers, this operation returns a tensor of
+type `float` that is the imaginary part of each element in `input`. All
+elements in `input` must be complex numbers of the form \\(a + bj\\), where *a*
+is the real part and *b* is the imaginary part returned by this operation.
 
 For example:
 
 ```
-# tensor 'in' is [-2.25 + 4.75j, 3.25 + 5.75j]
-tf.imag(in) ==> [4.75, 5.75]
+# tensor 'input' is [-2.25 + 4.75j, 3.25 + 5.75j]
+tf.imag(input) ==> [4.75, 5.75]
 ```
 )doc");
 
 REGISTER_OP("Conj")
-    .Input("in: complex64")
-    .Output("out: complex64")
+    .Input("input: T")
+    .Output("output: T")
+    .Attr("T: {complex64, complex128} = DT_COMPLEX64")
     .Doc(R"doc(
 Returns the complex conjugate of a complex number.
 
-Given a tensor `in` of complex numbers, this operation returns a tensor of
-complex numbers that are the complex conjugate of each element in `in`. The
-complex numbers in `in` must be of the form \\(a + bj\\), where *a* is the real
-part and *b* is the imaginary part.
+Given a tensor `input` of complex numbers, this operation returns a tensor of
+complex numbers that are the complex conjugate of each element in `input`. The
+complex numbers in `input` must be of the form \\(a + bj\\), where *a* is the
+real part and *b* is the imaginary part.
 
 The complex conjugate returned by this operation is of the form \\(a - bj\\).
 
 For example:
 
 ```
-# tensor 'in' is [-2.25 + 4.75j, 3.25 + 5.75j]
-tf.conj(in) ==> [-2.25 - 4.75j, 3.25 - 5.75j]
+# tensor 'input' is [-2.25 + 4.75j, 3.25 + 5.75j]
+tf.conj(input) ==> [-2.25 - 4.75j, 3.25 - 5.75j]
 ```
 )doc");
 
+REGISTER_OP("FFT")
+    .Input("input: complex64")
+    .Output("output: complex64")
+    .Doc(R"doc(
+Compute the 1-dimensional discrete Fourier Transform.
+
+input: A complex64 vector.
+output: The 1D Fourier Transform of `input`.
+)doc");
+
+REGISTER_OP("IFFT")
+    .Input("input: complex64")
+    .Output("output: complex64")
+    .Doc(R"doc(
+Compute the inverse 1-dimensional discrete Fourier Transform.
+
+input: A complex64 vector.
+output: The inverse 1D Fourier Transform of `input`.
+)doc");
+
 REGISTER_OP("FFT2D")
-    .Input("in: complex64")
-    .Output("out: complex64")
+    .Input("input: complex64")
+    .Output("output: complex64")
     .Doc(R"doc(
 Compute the 2-dimensional discrete Fourier Transform.
 
-in: A complex64 matrix.
-out: The 2D Fourier Transform of `in`.
-
+input: A complex64 matrix.
+output: The 2D Fourier Transform of `input`.
 )doc");
 
 REGISTER_OP("IFFT2D")
-    .Input("in: complex64")
-    .Output("out: complex64")
+    .Input("input: complex64")
+    .Output("output: complex64")
     .Doc(R"doc(
 Compute the inverse 2-dimensional discrete Fourier Transform.
 
-in: A complex64 matrix.
-out: The inverse 2D Fourier Transform of `in`.
+input: A complex64 matrix.
+output: The inverse 2D Fourier Transform of `input`.
+)doc");
 
+REGISTER_OP("FFT3D")
+    .Input("input: complex64")
+    .Output("output: complex64")
+    .Doc(R"doc(
+Compute the 3-dimensional discrete Fourier Transform.
+
+input: A complex64 3-D tensor.
+output: The 3D Fourier Transform of `input`.
+)doc");
+
+REGISTER_OP("IFFT3D")
+    .Input("input: complex64")
+    .Output("output: complex64")
+    .Doc(R"doc(
+Compute the inverse 3-dimensional discrete Fourier Transform.
+
+input: A complex64 3-D tensor.
+output: The inverse 3D Fourier Transform of `input`.
+)doc");
+
+REGISTER_OP("BatchFFT")
+    .Input("input: complex64")
+    .Output("output: complex64")
+    .Doc(R"doc(
+Compute the 1-dimensional discrete Fourier Transform over the inner-most
+dimension of `input`.
+
+input: A complex64 tensor.
+output: A complex64 tensor of the same shape as `input`. The inner-most
+  dimension of `input` is replaced with its 1D Fourier Transform.
+)doc");
+
+REGISTER_OP("BatchIFFT")
+    .Input("input: complex64")
+    .Output("output: complex64")
+    .Doc(R"doc(
+Compute the inverse 1-dimensional discrete Fourier Transform over the inner-most
+dimension of `input`.
+
+input: A complex64 tensor.
+output: A complex64 tensor of the same shape as `input`. The inner-most
+  dimension of `input` is replaced with its inverse 1D Fourier Transform.
+)doc");
+
+REGISTER_OP("BatchFFT2D")
+    .Input("input: complex64")
+    .Output("output: complex64")
+    .Doc(R"doc(
+Compute the 2-dimensional discrete Fourier Transform over the inner-most
+2 dimensions of `input`.
+
+input: A complex64 tensor.
+output: A complex64 tensor of the same shape as `input`. The inner-most 2
+  dimensions of `input` are replaced with their 2D Fourier Transform.
+)doc");
+
+REGISTER_OP("BatchIFFT2D")
+    .Input("input: complex64")
+    .Output("output: complex64")
+    .Doc(R"doc(
+Compute the inverse 2-dimensional discrete Fourier Transform over the inner-most
+2 dimensions of `input`.
+
+input: A complex64 tensor.
+output: A complex64 tensor of the same shape as `input`. The inner-most 2
+  dimensions of `input` are replaced with their inverse 2D Fourier Transform.
+)doc");
+
+REGISTER_OP("BatchFFT3D")
+    .Input("input: complex64")
+    .Output("output: complex64")
+    .Doc(R"doc(
+Compute the 3-dimensional discrete Fourier Transform over the inner-most 3
+dimensions of `input`.
+
+input: A complex64 tensor.
+output: A complex64 tensor of the same shape as `input`. The inner-most 3
+  dimensions of `input` are replaced with their 3D Fourier Transform.
+)doc");
+
+REGISTER_OP("BatchIFFT3D")
+    .Input("input: complex64")
+    .Output("output: complex64")
+    .Doc(R"doc(
+Compute the inverse 3-dimensional discrete Fourier Transform over the inner-most
+3 dimensions of `input`.
+
+input: A complex64 tensor.
+output: A complex64 tensor of the same shape as `input`. The inner-most 3
+  dimensions of `input` are replaced with their inverse 3D Fourier Transform.
 )doc");
 
 // --------------------------------------------------------------------------

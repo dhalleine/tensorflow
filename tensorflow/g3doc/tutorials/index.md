@@ -13,7 +13,7 @@ gentle introduction to multiclass classification.
 ## Deep MNIST for Experts
 
 If you're already familiar with other deep learning software packages, and are
-already familiar with MNIST, this tutorial with give you a very brief primer on
+already familiar with MNIST, this tutorial will give you a very brief primer on
 TensorFlow.
 
 [View Tutorial](../tutorials/mnist/pros/index.md)
@@ -22,7 +22,7 @@ TensorFlow.
 ## TensorFlow Mechanics 101
 
 This is a technical tutorial, where we walk you through the details of using
-TensorFlow infrastructure to train models at scale.  We use again MNIST as the
+TensorFlow infrastructure to train models at scale.  We again use MNIST as the
 example.
 
 [View Tutorial](../tutorials/mnist/tf/index.md)
@@ -74,6 +74,14 @@ translator, entirely machine learned, end-to-end.
 [View Tutorial](../tutorials/seq2seq/index.md)
 
 
+## SyntaxNet: Neural Models of Syntax
+
+An introduction to SyntaxNet, a Natural Language Processing framework for
+TensorFlow.
+
+[View Tutorial](../tutorials/syntaxnet/index.md)
+
+
 ## Mandelbrot Set
 
 TensorFlow can be used for computation that has nothing to do with machine
@@ -114,6 +122,4 @@ Building on the Inception recognition model, we will release a TensorFlow
 version of the [Deep Dream](https://github.com/google/deepdream) neural network
 visual hallucination software.
 
-COMING SOON
-
-
+[View Tutorial](https://www.tensorflow.org/code/tensorflow/examples/tutorials/deepdream/deepdream.ipynb)

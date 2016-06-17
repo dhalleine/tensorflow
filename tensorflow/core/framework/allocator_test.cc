@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -36,6 +36,26 @@ static void CheckStats(Allocator* a, int64 num_allocs, int64 bytes_in_use,
   EXPECT_EQ(stats.num_allocs, num_allocs);
   EXPECT_EQ(stats.max_alloc_size, max_alloc_size);
 #endif
+}
+
+TEST(AllocatorAttributesTest, AllCombos) {
+  for (bool on_host : {false, true}) {
+    for (bool nic_compatible : {false, true}) {
+      for (bool gpu_compatible : {false, true}) {
+        for (bool track_sizes : {false, true}) {
+          AllocatorAttributes aa;
+          aa.set_on_host(on_host);
+          aa.set_nic_compatible(nic_compatible);
+          aa.set_gpu_compatible(gpu_compatible);
+          aa.set_track_sizes(track_sizes);
+          EXPECT_EQ(on_host, aa.on_host());
+          EXPECT_EQ(nic_compatible, aa.nic_compatible());
+          EXPECT_EQ(gpu_compatible, aa.gpu_compatible());
+          EXPECT_EQ(track_sizes, aa.track_sizes());
+        }
+      }
+    }
+  }
 }
 
 TEST(CPUAllocatorTest, Simple) {

@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -75,6 +75,19 @@ TEST_F(GatherOpTest, Simple_TwoD32) {
   // Check the output.
   Tensor expected(allocator(), DT_FLOAT, TensorShape({4, 3}));
   test::FillValues<float>(&expected, {0, 1, 2, 12, 13, 14, 0, 1, 2, 6, 7, 8});
+  test::ExpectTensorEqual<float>(expected, *GetOutput(0));
+}
+
+TEST_F(GatherOpTest, ZeroSize_TwoD32) {
+  MakeOp(DT_INT32);
+
+  // Feed and run
+  AddInputFromArray<float>(TensorShape({5, 0}), {});
+  AddInputFromArray<int32>(TensorShape({4}), {0, 4, 0, 2});
+  TF_ASSERT_OK(RunOpKernel());
+
+  // Check the output.
+  Tensor expected(allocator(), DT_FLOAT, TensorShape({4, 0}));
   test::ExpectTensorEqual<float>(expected, *GetOutput(0));
 }
 

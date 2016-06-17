@@ -1,4 +1,4 @@
-/* Copyright 2016 Google Inc. All Rights Reserved.
+/* Copyright 2016 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,15 +27,11 @@ TestReporter::TestReporter(const string& fname, const string& test_name)
 Status TestReporter::Close() {
   if (closed_) return Status::OK();
 
-  string entry_string;
-  if (!protobuf::TextFormat::PrintToString(benchmark_entry_, &entry_string)) {
-    return errors::Internal("Could not serialize to string: ",
-                            benchmark_entry_.DebugString());
-  }
+  BenchmarkEntries entries;
+  *entries.add_entry() = benchmark_entry_;
+  TF_RETURN_IF_ERROR(log_file_->Append(entries.SerializeAsString()));
 
-  TF_RETURN_IF_ERROR(log_file_->Append(entry_string));
   benchmark_entry_.Clear();
-
   closed_ = true;
 
   return log_file_->Close();

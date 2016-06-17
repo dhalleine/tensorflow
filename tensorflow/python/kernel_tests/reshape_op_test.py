@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -48,8 +48,12 @@ class ReshapeTest(tf.test.TestCase):
     x = np.arange(1., 7.).reshape([1, 6]).astype(np.int32)
     self._testBothReshape(x, [2, 3])
 
-  def testSComplexBasic(self):
+  def testComplex64Basic(self):
     x = np.arange(1., 7.).reshape([1, 6]).astype(np.complex64)
+    self._testBothReshape(x, [2, 3])
+
+  def testComplex128Basic(self):
+    x = np.arange(1., 7.).reshape([1, 6]).astype(np.complex128)
     self._testBothReshape(x, [2, 3])
 
   def testFloatReshapeThreeDimensions(self):
@@ -72,10 +76,10 @@ class ReshapeTest(tf.test.TestCase):
   # reports errors.
 
   def testFloatReshapeGradThreeDimensions(self):
-    x = np.arange(1., 25.).reshape([1, 24]).astype(np.float32)
+    x = np.arange(1., 25.).reshape([2, 3, 4]).astype(np.float32)
     s = list(np.shape(x))
     with self.test_session():
-      input_tensor = tf.constant(x, shape=[2, 3, 4])
+      input_tensor = tf.constant(x)
       reshape_out = tf.reshape(input_tensor, [1, 8, 3])
       err = tf.test.compute_gradient_error(input_tensor,
                                            s,

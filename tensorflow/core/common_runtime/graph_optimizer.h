@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,7 +30,10 @@ class GraphOptimizer {
 
   // Applies optimization passes specified in 'opts' to 'graph'.
   // Maybe replace *graph with a new graph object.
-  void Optimize(FunctionLibraryRuntime* runtime, Graph** graph);
+  // 'device' is device on which the 'graph' will execute. It's passed to the
+  // optimizers so that they can respect constraints if any, that should be
+  // respected.
+  void Optimize(FunctionLibraryRuntime* runtime, Device* device, Graph** graph);
 
  private:
   OptimizerOptions opts_;

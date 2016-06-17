@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -235,6 +235,17 @@ REGISTER_OP("ControlTrigger")
     .Doc(R"doc(
 Does nothing. Serves as a control trigger for scheduling. Only useful as a
 placeholder for control edges.
+)doc");
+
+// --------------------------------------------------------------------------
+REGISTER_OP("Abort")
+    .Attr("error_msg: string = ''")
+    .Doc(R"doc(
+Raise a exception to abort the process when called.
+
+Returns nothing but an exception.
+
+error_msg: A string which is the message associated with the exception.
 )doc");
 
 }  // namespace tensorflow
